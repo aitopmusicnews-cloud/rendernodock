@@ -35,7 +35,8 @@ import { extractLastFrame } from "./frames.js";
 import { sliceAudio } from "./audio_slice.js";
 import { ensureVocalStem } from "./vocal.js";
 import { saveProject, listProjects, loadProject, deleteProject, listRenders } from "./projects.js";
-import { saveClip, listClips, deleteClip } from "./clips.js";
+// MODIFIED: Included generateLTXVideo in the imports from clips.js
+import { saveClip, listClips, deleteClip, generateLTXVideo } from "./clips.js";
 import { saveImage, listImages, deleteImage } from "./images.js";
 import { saveFolder, listFolders, deleteFolder } from "./folders.js";
 import {
@@ -453,6 +454,26 @@ app.post("/api/generate/text-to-video", { config: { rateLimit: { max: 10, timeWi
   return reply.send(await textToVideo(TextToVideoRequest.parse(req.body)));
 });
 
+// MODIFIED: Added LTX-Video generation API endpoint
+app.post("/api/generate/ltx-video", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
+  const body = z.object({
+    prompt: z.string().min(1),
+    duration: z.number().positive().default(4),
+  }).parse(req.body);
+
+  try {
+    const videoUrl = await generateLTXVideo(body.prompt, body.duration);
+    return reply.send({ 
+      id: `ltx-${Date.now()}`, 
+      status: "completed", 
+      output: [videoUrl] 
+    });
+  } catch (error: any) {
+    req.log.error(error, "Modal LTX generation failed");
+    return reply.code(500).send({ error: error.message });
+  }
+});
+
 // Avatars ---------------------------------------------------------------
 
 const CreateAvatarBody = z.object({
@@ -628,7 +649,7 @@ app.get("/api/projects/:id", async (req, reply) => {
 });
 
 app.delete("/api/projects/:id", async (req, reply) => {
-  const params = z.object({ id: SafeId }).parse(req.params);
+  const params = z.object({ id: SafeId }).parse(params.id);
   const deleted = await deleteProject(params.id);
   if (!deleted) return reply.code(404).send({ error: "not found" });
   return reply.send({ ok: true });
