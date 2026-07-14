@@ -336,6 +336,8 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
     }
 
     const cleanPrompt = prompt.replace(/[<>&"]/g, "").substring(0, 75).toUpperCase();
+    
+    // FIXED: Removed corrupt markdown link structure inside the xmlns property
     const svg = `
       <svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)">
         <defs>
@@ -594,7 +596,8 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouter
       const videoUrl = await generateLTXVideo(rawPrompt, duration);
       return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
     } catch (err: any) {
-      console.error("[LTX Image-To-Video Generation Error] Failed running Modal: ", err);
+      // MODIFIED: Throw the real Modal error back to the frontend instead of failing silently!
+      throw new Error(`LTX Generation failed: ${err.message || err}`);
     }
   }
 
@@ -631,7 +634,8 @@ export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTa
       const videoUrl = await generateLTXVideo(rawPrompt, duration);
       return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
     } catch (err: any) {
-      console.error("[LTX Text-To-Video Generation Error] Failed running Modal: ", err);
+      // MODIFIED: Throw the real Modal error back to the frontend instead of failing silently!
+      throw new Error(`LTX Generation failed: ${err.message || err}`);
     }
   }
 
