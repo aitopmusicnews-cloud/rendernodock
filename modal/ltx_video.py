@@ -24,6 +24,8 @@ image = (
         "pillow==11.1.0",
         "torch==2.6.0",
         "transformers==4.49.0",
+        "sentencepiece==0.2.0",  # ADDED: Solves the T5Tokenizer ImportError
+        "protobuf==5.29.3",     # ADDED: Handles text encoder serialization
     )
     .env({"HF_HUB_CACHE": MODEL_DIR})
 )
