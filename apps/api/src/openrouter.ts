@@ -783,3 +783,5 @@ export async function getTask(encodedId: string): Promise<TaskResult> {
 export async function deleteTask(encodedId: string) {
   // no-op
 }
+  // no-op
+}
