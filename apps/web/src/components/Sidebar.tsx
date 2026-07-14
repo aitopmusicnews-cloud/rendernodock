@@ -18,7 +18,8 @@ const SOURCES: Array<{ value: Clip["source"]; label: string; desc: string }> = [
 ];
 
 // Models for image-to-video paths (continue / archetype / generated).
-const IMAGE_TO_VIDEO_MODELS: Array<{ value: GenerationModel; label: string; desc: string }> = [
+const IMAGE_TO_VIDEO_MODELS: Array<{ value: any; label: string; desc: string }> = [
+  { value: "ltx-video", label: "LTX Video", desc: "Modal GPU · high-motion video · 24fps" }, // ADDED LTX-VIDEO
   { value: "openrouter_ultra", label: "OpenRouter Ultra", desc: "flagship · Gemini 2.5 Pro · 5s" },
   { value: "openrouter_flash", label: "OpenRouter Flash", desc: "fast · Gemini 2.5 Flash · 5s" },
   { value: "local_wan21", label: "Wan v2.1 Local", desc: "local GPU · 5s" },
@@ -28,7 +29,8 @@ const IMAGE_TO_VIDEO_MODELS: Array<{ value: GenerationModel; label: string; desc
 ];
 
 // Subset for text-to-video (no image-only models).
-const TEXT_TO_VIDEO_MODELS: Array<{ value: GenerationModel; label: string; desc: string }> = [
+const TEXT_TO_VIDEO_MODELS: Array<{ value: any; label: string; desc: string }> = [
+  { value: "ltx-video", label: "LTX Video", desc: "Modal GPU · high-motion video · 24fps" }, // ADDED LTX-VIDEO
   { value: "openrouter_ultra", label: "OpenRouter Ultra", desc: "flagship · Gemini 2.5 Pro · 5s" },
   { value: "openrouter_flash", label: "OpenRouter Flash", desc: "fast · Gemini 2.5 Flash · 5s" },
   { value: "local_wan21", label: "Wan v2.1 Local", desc: "local GPU · 5s" },
@@ -76,11 +78,9 @@ export function Sidebar() {
   const hasPrev = clipIdx > 0 && clips[clipIdx - 1]?.status === "ready";
   const hasNext = clipIdx >= 0 && clipIdx < clips.length - 1 && clips[clipIdx + 1]?.status === "ready";
 
-  // Per-source default model. Continue uses Veo 3.1 Fast — strongest
-  // music-responsive motion at low latency. Everything else falls through
-  // to SeedDance 2 (high-quality general purpose).
+  // MODIFIED: Fallback defaults to "ltx-video" now
   const effectiveModel =
-    clip.model ?? (clip.source === "continue" ? "openrouter_flash" : "openrouter_flash");
+    clip.model ?? (clip.source === "continue" ? "ltx-video" : "ltx-video");
   const showModelPicker =
     clip.source !== "lipSync" &&
     clip.source !== "library";
@@ -92,8 +92,6 @@ export function Sidebar() {
   const setImagePrompt = (value: string) => updateClip(clip.id, { imagePrompt: value });
   const setBridge = (on: boolean) => updateClip(clip.id, { bridge: on });
 
-  // Bridge toggle visibility: only when continue + both neighbors ready +
-  // selected model accepts a `last` keyframe.
   const canBridge =
     clip.source === "continue" &&
     hasPrev &&
@@ -117,8 +115,6 @@ export function Sidebar() {
       toast.warning(canGenerate.reason);
       return;
     }
-    // "generated" and "textToVideo" both don't take an upfront seed image;
-    // pass empty here. For others, derive from the lookbook or character.
     const seed =
       clip.source === "generated" || clip.source === "textToVideo"
         ? ""
@@ -321,18 +317,12 @@ function checkCanGenerate(
     return { ok: true };
   }
   if (clip.source === "generated" || clip.source === "textToVideo") {
-    // No prompt required — generation falls back to the auto-default
-    // ("section, energy x, cinematic") when blank.
     return { ok: true };
   }
   if (clip.source === "library") {
-    // The library picker applies the videoUrl directly; the Generate button
-    // isn't even shown for this source. Always ok.
     return { ok: true };
   }
   if (clip.source === "continue") {
-    // Seed comes from the previous clip's last frame; the character image is
-    // only a fallback for the very first clip on the timeline.
     if (ctx.hasPrev) return { ok: true };
     if (!ctx.characterImage) {
       return { ok: false, reason: "First clip needs a previous clip or a character image to seed from" };
@@ -443,8 +433,6 @@ function ArchetypeGrid({
   onPick: (url: string) => void;
   onClear: () => void;
 }) {
-  // Include the per-clip override (if any) as an extra tile so it's visible
-  // in the same grid alongside the lookbook.
   const customUrl = archetypeUrl && !lookbook.includes(archetypeUrl) ? archetypeUrl : null;
   const tiles = customUrl ? [...lookbook, customUrl] : lookbook;
   const effective = archetypeUrl ?? lookbook[0];
@@ -515,7 +503,6 @@ function SavedClipPicker({
       .finally(() => setLoading(false));
   };
 
-  // Load on mount; not on every render — picker re-fetches via the refresh button.
   useEffect(refresh, []);
 
   return (
