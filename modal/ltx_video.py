@@ -42,7 +42,7 @@ with image.imports():
 class LTXGenerator:
     @modal.enter()
     def load_model(self):
-        self.pipe = LTXVPipeline.from_pretrained(
+        self.pipe = LTXPipeline.from_pretrained(
             "Lightricks/LTX-Video",
             torch_dtype=torch.bfloat16,
         ).to("cuda")
