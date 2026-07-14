@@ -15,13 +15,24 @@ import { runFfmpeg } from "./ffmpeg.js";
 import { storage } from "./storage.js";
 
 // OpenRouter client helper to query LLM
-export async function callOpenRouter(prompt: string, systemInstruction?: string): Promise<string> {
+export async function callOpenRouter(prompt: string, systemInstruction?: string, maxTokens: number = 3000): Promise<string> {
   const apiKey = config.OPENROUTER_API_KEY;
   if (!apiKey || apiKey === "missing-OPENROUTER_API_KEY") {
     throw new Error("OPENROUTER_API_KEY is not configured.");
   }
 
-  const model = config.OPENROUTER_MODEL || "google/gemini-2.5-flash";
+  let model = config.OPENROUTER_MODEL || "google/gemini-2.5-flash";
+  if (model === "openrouter/free") {
+    console.log(`[OpenRouter] Mapping invalid model 'openrouter/free' to 'google/gemini-2.5-flash'`);
+    model = "google/gemini-2.5-flash";
+  }
+  if (model.endsWith(":free")) {
+    console.log(`[OpenRouter] Mapping free model variant '${model}' to '${model.replace(":free", "")}'`);
+    model = model.replace(":free", "");
+  }
+
+  console.log(`[OpenRouter] Sending request to model '${model}' with max_tokens=${maxTokens}...`);
+  
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -37,11 +48,13 @@ export async function callOpenRouter(prompt: string, systemInstruction?: string)
         { role: "user", content: prompt }
       ],
       temperature: 0.7,
+      max_tokens: maxTokens,
     }),
   });
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
+    console.error(`[OpenRouter Error] HTTP Status ${response.status}: ${errorText}`);
     throw new Error(`OpenRouter API failed with status ${response.status}: ${errorText}`);
   }
 
@@ -57,13 +70,15 @@ export async function callOpenRouter(prompt: string, systemInstruction?: string)
 export async function enhancePromptText(promptText: string): Promise<string> {
   const systemPrompt = `You are a cinematic prompt engineer for a music video production suite. 
 Your goal is to enhance the user's description into a highly detailed visual prompt for video/image generation models.
-Inject sensory and visual details focusing on:
-- Style: Cyber-Organic, High-Fashion Minimalism, gritty rap/trap/neo-noir style.
-- Atmosphere & Colors: Deep Obsidian Blacks, Stark Metallic Silver, Intense Amber/Fire Accents.
-- Camera and Lighting: Dramatic high-contrast shadows, volumetric lighting, slow motion, precise lens framing (35mm, anamorphic flares).
+CRITICAL RULE: Always respect the user's defined style, genre, color palette, mood, and aesthetic described in their prompt.
+Do NOT force a 'cyber', 'noir', or 'dark' style unless the user's prompt explicitly requests or strongly implies it.
+Enhance by expanding the user's core concepts with professional visual and sensory details focusing on:
+- Style & Mood: Preserve and elevate the user's chosen style (e.g., hyper-realistic, pastel, modern minimal, neon, retro, watercolor, vibrant, sketch, etc.).
+- Atmosphere & Colors: Amplify the lighting, mood, and color tones explicitly mentioned or implied by the user's prompt.
+- Camera and Composition: Inject professional cinematic terms (e.g., precise lens framing, high-contrast, atmospheric depth, camera movement, light rays, composition, depth of field) that enhance their requested style.
 Do NOT include any introduction, explanations, notes, or wrap the response in quotation marks. Output ONLY the raw enhanced prompt. Keep it under 250 characters.`;
 
-  return callOpenRouter(promptText, systemPrompt);
+  return callOpenRouter(promptText, systemPrompt, 500);
 }
 
 export async function enhancePromptIfNeeded(promptText: string): Promise<string> {
@@ -87,18 +102,27 @@ export async function generateSvgWithOpenRouter(prompt: string): Promise<string 
   try {
     const systemPrompt = `You are an elite professional generative SVG visual artist.
 Your job is to generate highly stylized, modern, cinematic, vector-based SVG graphics matching the user's prompt.
-Aesthetic & Style Guidelines (Gritty Rap/Trap, Neo-Noir, High-Fashion Minimalism, Cyber-Organic):
-- Main colors to utilize: Deep Obsidian/Midnight Blacks, Stark Metallic Silvers/Platinums, Intense Amber/Fire Glow accents, or Deep bruised violet/purple neon.
+Aesthetic & Style Guidelines:
+- Directly translate the user's prompt into a corresponding vector visual style. If they want bright, colorful, watercolor, retro, line art, futuristic, minimal, or high-fashion, design exactly that style.
+- Choose a color palette that perfectly represents the user's requested theme (e.g. pastel colors for soft themes, primary colors for pop art, or dark/neon for cyber themes).
 - Canvas dimensions: Must be EXACTLY width="1280" height="720" viewBox="0 0 1280 720".
-- Gradients & Background: Define robust <linearGradient> or <radialGradient> tags inside a <defs> block, and set a full-canvas background <rect width="1280" height="720" fill="url(#yourGradId)" /> to create immense depth and mood.
-- Lighting: Utilize soft glow filter blurs (e.g., using <feGaussianBlur stdDeviation="X" />) to create glowing neon lines, flares, lighters, spotlights, and ambient silhouettes.
-- Details: Overlay some clean technical/monospaced text grids (e.g., matching the song "KEEP EM' THIRSTY" at 140 BPM, "DIRECTIVE // SEC: 140", and the prompt) to give it a high-end designer blueprint look.
-- Geometry: Use elegant paths, polygons, smooth curves, grids, patterns, or abstract architectural wireframes.
+- Gradients & Background: Define robust <linearGradient> or <radialGradient> tags inside a <defs> block, and set a full-canvas background <rect width="1280" height="720" fill="url(#yourGradId)" /> to create depth and mood.
+- Lighting & Effects: Utilize glow filter blurs (e.g., <feGaussianBlur stdDeviation="X" />) if appropriate, or clean sharp vectors depending on the requested style.
+- Geometry: Use paths, polygons, smooth curves, grids, or custom shapes that best match the aesthetic in the user's prompt.
 - EXTREMELY CRITICAL FORMATTING RULE: Output ONLY valid, raw, standard SVG code starting with <svg and ending with </svg>.
 - Do NOT wrap in markdown code blocks like \`\`\`xml or \`\`\`svg. Do NOT write any introduction, notes, descriptions, explanation, or trailing commentaries. Output only the raw XML SVG text.`;
 
-    const rawResponse = await callOpenRouter(prompt, systemPrompt);
+    const rawResponse = await callOpenRouter(prompt, systemPrompt, 3000);
     let cleaned = rawResponse.trim();
+    
+    // Extract standard SVG dynamically to handle conversational wrapper text
+    const svgStartIdx = cleaned.indexOf("<svg");
+    const svgEndIdx = cleaned.lastIndexOf("</svg>");
+    if (svgStartIdx !== -1 && svgEndIdx !== -1 && svgEndIdx > svgStartIdx) {
+      cleaned = cleaned.substring(svgStartIdx, svgEndIdx + 6);
+      return cleaned;
+    }
+
     if (cleaned.startsWith("```")) {
       // Stripping code fences if the model disregarded the instruction
       cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "").trim();
@@ -110,8 +134,8 @@ Aesthetic & Style Guidelines (Gritty Rap/Trap, Neo-Noir, High-Fashion Minimalism
     }
     console.log("[OpenRouter SVG] Custom generation did not return standard SVG structure. Fallback is applied.");
     return null;
-  } catch (err) {
-    console.log("[OpenRouter SVG] Custom SVG generation unavailable, using standard fallback.");
+  } catch (err: any) {
+    console.error("[OpenRouter SVG Error] Custom SVG generation failed with error:", err?.message || err);
     return null;
   }
 }
@@ -140,7 +164,7 @@ function rethrowOpenRouter(err: unknown): never {
 
 // Helper to encode/decode task IDs to support routing status/result checks
 interface TaskIdPayload {
-  source: "openrouter" | "procedural";
+  source: "openrouter" | "procedural" | "fal";
   id: string;
 }
 
@@ -153,7 +177,7 @@ function decodeTaskId(encoded: string): TaskIdPayload {
   try {
     const str = Buffer.from(encoded, "base64url").toString("utf8");
     const parsed = JSON.parse(str);
-    if (parsed && (parsed.source === "openrouter" || parsed.source === "procedural") && parsed.id) {
+    if (parsed && (parsed.source === "openrouter" || parsed.source === "procedural" || parsed.source === "fal") && parsed.id) {
       return parsed;
     }
   } catch (e) {
@@ -347,7 +371,7 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
         <line x1="1250" y1="660" x2="1220" y2="690" stroke="${accentColor}" stroke-width="1.5" opacity="0.6"/>
 
         <!-- Sleek monospaced details -->
-        <text x="60" y="650" font-family="'Courier New', Courier, monospace" font-size="13" fill="${accentColor}" letter-spacing="3" opacity="0.8">KEEP EM' THIRSTY // DIRECTIVE 140 BPM</text>
+        <text x="60" y="650" font-family="'Courier New', Courier, monospace" font-size="13" fill="${accentColor}" letter-spacing="3" opacity="0.8">${cleanPrompt ? `${cleanPrompt} // DIRECTIVE 140 BPM` : "KEEP EM' THIRSTY // DIRECTIVE 140 BPM"}</text>
         <text x="60" y="670" font-family="'Courier New', Courier, monospace" font-size="11" fill="#94a3b8" letter-spacing="1.5" opacity="0.5">SCENE CREATIVE // PROMPT: ${cleanPrompt}</text>
         <text x="1120" y="650" font-family="'Courier New', Courier, monospace" font-size="11" fill="#94a3b8" letter-spacing="2" opacity="0.4">LOCAL MODE</text>
       </svg>
@@ -406,6 +430,8 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
   return finalVideoUrl;
 }
 
+let localInferenceOfflineUntil = 0;
+
 // Support self-hosted/open-source inference backend if LOCAL_INFERENCE_URL is defined
 async function callLocalInference(
   type: "video" | "image",
@@ -413,6 +439,11 @@ async function callLocalInference(
   extraPayload: Record<string, any> = {}
 ): Promise<string | null> {
   if (!config.LOCAL_INFERENCE_URL) return null;
+
+  if (Date.now() < localInferenceOfflineUntil) {
+    console.log("[Local Inference] Skipping (cooling down from previous connection failure).");
+    return null;
+  }
 
   try {
     const baseUrl = config.LOCAL_INFERENCE_URL.replace(/\/+$/, "");
@@ -429,92 +460,125 @@ async function callLocalInference(
       );
     }
 
-    // Try standard endpoint formats (like /v1/video/generate or /v1/image/generate)
     const endpointPath = type === "video" ? "/v1/video/generate" : "/v1/image/generate";
-    const fullUrl = `${baseUrl}${endpointPath}`;
+    
+    // For Modal endpoints or custom endpoints, try root `/`, `/generate` or standard path
+    const candidates: string[] = [];
+    if (baseUrl.includes("modal.run")) {
+      candidates.push(baseUrl); // Try root first (extremely common for simple Modal web_endpoints)
+      candidates.push(`${baseUrl}/generate`);
+      candidates.push(`${baseUrl}${endpointPath}`);
+    } else {
+      candidates.push(`${baseUrl}${endpointPath}`);
+      candidates.push(baseUrl);
+      candidates.push(`${baseUrl}/generate`);
+    }
 
     const bodyPayload = {
       prompt,
       ...extraPayload,
     };
 
-    const urlWithParams = new URL(fullUrl);
-    
-    // Helper to only include safe, short parameters in the query string
-    const isSafeQueryParam = (val: any): boolean => {
-      if (val === null || val === undefined) return false;
-      const str = String(val);
-      if (str.length > 150) return false;
-      if (str.includes(";base64,") || str.startsWith("data:") || str.includes("\n")) return false;
-      return true;
-    };
+    let lastError: any = null;
+    let successUrl: string | null = null;
 
-    if (isSafeQueryParam(prompt)) {
-      urlWithParams.searchParams.set("prompt", prompt);
-    } else if (prompt) {
-      // If the prompt is too long, truncate it for the query parameter fallback
-      urlWithParams.searchParams.set("prompt", prompt.substring(0, 120) + "...");
-    }
+    // Real video generation can take up to 3 minutes
+    const isLocalhost = baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1") || baseUrl.includes("0.0.0.0");
+    const timeoutMs = isLocalhost ? 5000 : 180000;
 
-    for (const [key, value] of Object.entries(extraPayload)) {
-      if (isSafeQueryParam(value)) {
-        urlWithParams.searchParams.set(key, String(value));
+    for (const candidate of candidates) {
+      try {
+        const urlWithParams = new URL(candidate);
+        
+        // Helper to only include safe, short parameters in the query string
+        const isSafeQueryParam = (val: any): boolean => {
+          if (val === null || val === undefined) return false;
+          const str = String(val);
+          if (str.length > 150) return false;
+          if (str.includes(";base64,") || str.startsWith("data:") || str.includes("\n")) return false;
+          return true;
+        };
+
+        if (isSafeQueryParam(prompt)) {
+          urlWithParams.searchParams.set("prompt", prompt);
+        } else if (prompt) {
+          urlWithParams.searchParams.set("prompt", prompt.substring(0, 120) + "...");
+        }
+
+        for (const [key, value] of Object.entries(extraPayload)) {
+          if (isSafeQueryParam(value)) {
+            urlWithParams.searchParams.set(key, String(value));
+          }
+        }
+
+        console.log(`[Local Inference] Trying endpoint: ${urlWithParams.toString()}`);
+        
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          "bypass-tunnel-reminder": "true",
+          "Bypass-Tunnel-Reminder": "true",
+          "ngrok-skip-browser-warning": "69420",
+          "Ngrok-Skip-Browser-Warning": "any-value"
+        };
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        let res: Response;
+        try {
+          res = await fetch(urlWithParams.toString(), {
+            method: "POST",
+            headers,
+            body: JSON.stringify(bodyPayload),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+
+        if (res.status === 404) {
+          console.log(`[Local Inference] Endpoint ${candidate} returned 404, trying next fallback...`);
+          continue;
+        }
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          console.log(`[Local Inference] Endpoint ${candidate} responded with status ${res.status}:`, text);
+          throw new Error(`Endpoint returned status ${res.status}: ${text}`);
+        }
+
+        const data = await res.json() as any;
+        console.log(`[Local Inference] Success response from ${candidate}:`, data);
+
+        const url =
+          data.video_url ||
+          data.image_url ||
+          data.url ||
+          data.video ||
+          data.image ||
+          (Array.isArray(data.outputs) && data.outputs[0]) ||
+          (Array.isArray(data.images) && data.images[0]?.url) ||
+          (Array.isArray(data.images) && data.images[0]);
+
+        if (typeof url === "string" && url) {
+          successUrl = url;
+          break; // Exit candidate loop on success!
+        }
+
+        throw new Error(`Response did not contain a valid URL in standard keys. Received: ${JSON.stringify(data)}`);
+      } catch (err: any) {
+        console.log(`[Local Inference] Endpoint ${candidate} failed:`, err?.message || err);
+        lastError = err;
       }
     }
 
-    console.log(`[Local Inference] Calling self-hosted API (Safe URL): ${urlWithParams.origin}${urlWithParams.pathname}`);
-    
-    // Send both query params AND JSON body for maximum compatibility with custom frameworks
-    // Pass bypass headers to prevent tunnel warning/reminder pages from interrupting the request
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "bypass-tunnel-reminder": "true",
-      "Bypass-Tunnel-Reminder": "true",
-      "ngrok-skip-browser-warning": "69420",
-      "Ngrok-Skip-Browser-Warning": "any-value"
-    };
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-    let res: Response;
-    try {
-      res = await fetch(urlWithParams.toString(), {
-        method: "POST",
-        headers,
-        body: JSON.stringify(bodyPayload),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeoutId);
+    if (successUrl) {
+      return successUrl;
     }
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      console.log(`[Local Inference] Note: API responded with status ${res.status}:`, text);
-      throw new Error(`Self-hosted inference API returned status ${res.status}: ${text}`);
-    }
-
-    const data = await res.json() as any;
-    console.log(`[Local Inference] Success response:`, data);
-
-    // Support flexible keys returned by custom/open-source APIs
-    const url =
-      data.video_url ||
-      data.image_url ||
-      data.url ||
-      data.video ||
-      data.image ||
-      (Array.isArray(data.outputs) && data.outputs[0]) ||
-      (Array.isArray(data.images) && data.images[0]?.url) ||
-      (Array.isArray(data.images) && data.images[0]);
-
-    if (typeof url === "string" && url) {
-      return url;
-    }
-
-    throw new Error(`Self-hosted API response did not contain a valid URL in standard keys. Received: ${JSON.stringify(data)}`);
+    throw lastError || new Error("All candidate local inference endpoints failed.");
   } catch (err: any) {
+    localInferenceOfflineUntil = Date.now() + 60 * 1000;
     const baseUrl = config.LOCAL_INFERENCE_URL || "";
     const isLoopback = baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1") || baseUrl.includes("0.0.0.0");
     if (isLoopback && config.PUBLIC_BASE_URL && !config.PUBLIC_BASE_URL.includes("localhost") && !config.PUBLIC_BASE_URL.includes("127.0.0.1")) {
@@ -530,6 +594,8 @@ async function callLocalInference(
     throw err;
   }
 }
+
+
 
 export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouterTask> {
   const promptText = await enhancePromptIfNeeded(req.promptText ?? "");
