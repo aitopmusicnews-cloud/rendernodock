@@ -1,0 +1,585 @@
+import { useEffect, useMemo, useState } from "react";
+import { useStore, MAX_CLIP_LEN } from "../lib/store.js";
+import type { Clip, GenerationModel } from "@mvs/shared";
+import { enqueueGeneration } from "../lib/scheduler.js";
+import { listSavedClips, type SavedClip } from "../lib/api.js";
+import { getErrorMessage, modelSupportsBridge } from "@mvs/shared";
+import { AssetUploader } from "./AssetUploader.js";
+import { toast } from "../lib/toast.js";
+
+const SOURCES: Array<{ value: Clip["source"]; label: string; desc: string }> = [
+  { value: "continue", label: "Continue from previous clip", desc: "use last frame of prev as init" },
+  { value: "archetype", label: "Seed from lookbook", desc: "use a specific lookbook image as the init frame" },
+  { value: "generated", label: "Generate fresh image", desc: "text-to-image seed, then image-to-video" },
+  { value: "textToVideo", label: "Text-to-video", desc: "prompt → video directly, no seed image" },
+  { value: "library", label: "From clip library", desc: "reuse a previously saved clip — no generation" },
+  { value: "lipSync", label: "Character sings this section", desc: "Lip Sync · vocal stem" },
+  { value: "aleph", label: "Restyle existing clip", desc: "Aleph · video-to-video" },
+];
+
+// Models for image-to-video paths (continue / archetype / generated).
+const IMAGE_TO_VIDEO_MODELS: Array<{ value: GenerationModel; label: string; desc: string }> = [
+  { value: "openrouter_ultra", label: "OpenRouter Ultra", desc: "flagship · Gemini 2.5 Pro · 5s" },
+  { value: "openrouter_flash", label: "OpenRouter Flash", desc: "fast · Gemini 2.5 Flash · 5s" },
+  { value: "local_wan21", label: "Wan v2.1 Local", desc: "local GPU · 5s" },
+  { value: "seedance2", label: "SeedDance 2", desc: "high quality · 5–15s" },
+  { value: "veo3.1", label: "Veo 3.1", desc: "Google · 4 / 6 / 8s" },
+  { value: "veo3.1_fast", label: "Veo 3.1 Fast", desc: "Google · faster · 4 / 6 / 8s" },
+];
+
+// Subset for text-to-video (no image-only models).
+const TEXT_TO_VIDEO_MODELS: Array<{ value: GenerationModel; label: string; desc: string }> = [
+  { value: "openrouter_ultra", label: "OpenRouter Ultra", desc: "flagship · Gemini 2.5 Pro · 5s" },
+  { value: "openrouter_flash", label: "OpenRouter Flash", desc: "fast · Gemini 2.5 Flash · 5s" },
+  { value: "local_wan21", label: "Wan v2.1 Local", desc: "local GPU · 5s" },
+  { value: "seedance2", label: "SeedDance 2", desc: "high quality · 5–15s" },
+  { value: "veo3.1", label: "Veo 3.1", desc: "Google · 4 / 6 / 8s" },
+  { value: "veo3.1_fast", label: "Veo 3.1 Fast", desc: "faster · 4 / 6 / 8s" },
+];
+
+// Aleph (video-to-video) constrains to openrouter_aleph or seedance2 server-side.
+const ALEPH_MODELS: Array<{ value: GenerationModel; label: string; desc: string }> = [
+  { value: "openrouter_aleph", label: "OpenRouter Aleph", desc: "primary restyle path" },
+  { value: "seedance2", label: "SeedDance 2", desc: "alt restyle" },
+];
+
+function modelsForSource(source: Clip["source"]): typeof IMAGE_TO_VIDEO_MODELS {
+  if (source === "textToVideo") return TEXT_TO_VIDEO_MODELS;
+  if (source === "aleph") return ALEPH_MODELS;
+  return IMAGE_TO_VIDEO_MODELS;
+}
+
+export function Sidebar() {
+  const selectedId = useStore((s) => s.selectedClipId);
+  const clips = useStore((s) => s.clips);
+  const analysis = useStore((s) => s.analysis);
+  const lookbook = useStore((s) => s.lookbook);
+  const updateClip = useStore((s) => s.updateClip);
+  const characterImage = useStore((s) => s.characterImageUrl);
+  const avatarId = useStore((s) => s.avatarId);
+  const avatarStatus = useStore((s) => s.avatarStatus);
+  const songId = useStore((s) => s.songId);
+  const audioUrl = useStore((s) => s.audioUrl);
+
+  const clip = useMemo(() => clips.find((c) => c.id === selectedId) ?? null, [clips, selectedId]);
+
+  if (!clip || !analysis) return null;
+
+  const section = analysis.sections.find((s) => s.start <= clip.start && s.end >= clip.end);
+  const sectionLabel = section?.label ?? "section";
+  const durationSec = clip.end - clip.start;
+  const energy = avgRms(analysis.rmsCurve, clip.start, clip.end, analysis.duration);
+  const prompt = clip.prompt ?? "";
+  const imagePrompt = clip.imagePrompt ?? "";
+
+  const clipIdx = clips.findIndex((c) => c.id === clip.id);
+  const hasPrev = clipIdx > 0 && clips[clipIdx - 1]?.status === "ready";
+  const hasNext = clipIdx >= 0 && clipIdx < clips.length - 1 && clips[clipIdx + 1]?.status === "ready";
+
+  // Per-source default model. Continue uses Veo 3.1 Fast — strongest
+  // music-responsive motion at low latency. Everything else falls through
+  // to SeedDance 2 (high-quality general purpose).
+  const effectiveModel =
+    clip.model ?? (clip.source === "continue" ? "openrouter_flash" : "openrouter_flash");
+  const showModelPicker =
+    clip.source !== "lipSync" &&
+    clip.source !== "library";
+  const isLibrarySource = clip.source === "library";
+
+  const setSource = (source: Clip["source"]) => updateClip(clip.id, { source });
+  const setModel = (model: GenerationModel) => updateClip(clip.id, { model });
+  const setPrompt = (value: string) => updateClip(clip.id, { prompt: value });
+  const setImagePrompt = (value: string) => updateClip(clip.id, { imagePrompt: value });
+  const setBridge = (on: boolean) => updateClip(clip.id, { bridge: on });
+
+  // Bridge toggle visibility: only when continue + both neighbors ready +
+  // selected model accepts a `last` keyframe.
+  const canBridge =
+    clip.source === "continue" &&
+    hasPrev &&
+    hasNext &&
+    modelSupportsBridge(effectiveModel);
+
+  const canGenerate = checkCanGenerate(clip, {
+    prompt,
+    imagePrompt,
+    avatarId,
+    avatarStatus,
+    songId,
+    audioUrl,
+    lookbook,
+    characterImage,
+    hasPrev,
+  });
+
+  const onGenerate = () => {
+    if (!canGenerate.ok) {
+      toast.warning(canGenerate.reason);
+      return;
+    }
+    // "generated" and "textToVideo" both don't take an upfront seed image;
+    // pass empty here. For others, derive from the lookbook or character.
+    const seed =
+      clip.source === "generated" || clip.source === "textToVideo"
+        ? ""
+        : clip.source === "archetype"
+          ? clip.archetypeUrl ?? lookbook[0] ?? ""
+          : characterImage ?? "";
+    enqueueGeneration({
+      clipId: clip.id,
+      source: clip.source,
+      seedImageUrl: seed,
+      inputVideoUrl: clip.source === "aleph" ? clip.videoUrl : undefined,
+      songId: clip.source === "lipSync" ? songId ?? undefined : undefined,
+      audioUrl: clip.source === "lipSync" ? audioUrl ?? undefined : undefined,
+      avatarId: clip.source === "lipSync" ? avatarId ?? undefined : undefined,
+      clipStart: clip.source === "lipSync" ? clip.start : undefined,
+      clipEnd: clip.source === "lipSync" ? clip.end : undefined,
+      prompt,
+      imagePrompt: clip.source === "generated" ? imagePrompt : undefined,
+      duration: durationSec,
+      sectionLabel,
+      energy,
+      model: showModelPicker ? effectiveModel : undefined,
+      referenceImages: clip.source === "generated" ? lookbook.slice(0, 3) : undefined,
+      bridge: canBridge && (clip.bridge ?? false) ? true : undefined,
+    });
+  };
+
+  return (
+    <>
+      <div className="sidebar-header-row">
+        <span className="pill">{sectionLabel}</span>
+        <span className="meta">{durationSec.toFixed(1)}s · {clip.id}</span>
+      </div>
+
+      <SourcePicker
+        clip={clip}
+        effectiveModel={effectiveModel}
+        showModelPicker={showModelPicker}
+        lookbook={lookbook}
+        canBridge={canBridge}
+        onSourceChange={setSource}
+        onModelChange={setModel}
+        onBridgeChange={setBridge}
+        onUpdateClip={updateClip}
+      />
+
+      {isLibrarySource ? (
+        <SavedClipPicker
+          currentVideoUrl={clip.videoUrl}
+          onPick={(saved) =>
+            updateClip(clip.id, {
+              videoUrl: saved.videoUrl,
+              status: "ready",
+              lastError: undefined,
+              generationTaskId: undefined,
+              prompt: saved.prompt ?? undefined,
+            })
+          }
+        />
+      ) : clip.source === "generated" ? (
+        <>
+          <div className="option-group">
+            <div className="label">Image prompt</div>
+            <textarea
+              className="prompt"
+              placeholder="anya in a flooded subway, neon reflections, 35mm film grain…"
+              value={imagePrompt}
+              onChange={(e) => setImagePrompt(e.target.value)}
+            />
+          </div>
+          <div className="option-group">
+            <div className="label">Motion prompt (optional)</div>
+            <textarea
+              className="prompt"
+              placeholder="slow dolly-in, water ripples, hair drifts in the wind…"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+          </div>
+        </>
+      ) : (
+        <div className="option-group">
+          <div className="label">Prompt (optional)</div>
+          <textarea
+            className="prompt"
+            placeholder="anya running through neon rain, slow shutter…"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+          />
+        </div>
+      )}
+
+      <div className="option-group">
+        <div className="label">Audio context (auto)</div>
+        <div className="context-card">
+          <div className="row"><span>Section</span><span>{sectionLabel}</span></div>
+          <div className="row"><span>Energy</span><span>{energy.toFixed(2)}</span></div>
+          <div className="row">
+            <span>Duration</span>
+            <span>
+              {durationSec.toFixed(2)}s
+              <span className="dim" style={{ marginLeft: 6 }}>/ {MAX_CLIP_LEN}s cap</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {clip.status === "failed" && clip.lastError && (
+        <div className="error-card">
+          <div className="error-title">last attempt failed</div>
+          <div className="error-message">{clip.lastError}</div>
+        </div>
+      )}
+
+      <div className="sidebar-footer">
+        {!isLibrarySource && (
+          <button
+            className="generate-btn"
+            onClick={onGenerate}
+            disabled={
+              clip.status === "queued" ||
+              clip.status === "generating" ||
+              !canGenerate.ok
+            }
+            title={canGenerate.ok ? undefined : canGenerate.reason}
+          >
+            {clip.status === "queued"
+              ? "Queued…"
+              : clip.status === "generating"
+                ? "Generating…"
+                : clip.status === "failed"
+                  ? "Retry"
+                  : clip.source === "aleph"
+                    ? "Restyle clip"
+                    : clip.source === "lipSync"
+                      ? "Lip-sync vocal"
+                      : clip.status === "ready"
+                        ? "Regenerate"
+                        : "Generate"}
+          </button>
+        )}
+
+        {(clip.videoUrl || clip.status !== "empty") && (
+          <button
+            type="button"
+            className="btn ghost clear-clip-btn"
+            onClick={() => {
+              const isReady = clip.status === "ready";
+              if (isReady && !confirm("Clear this clip's video? Source choice and prompts are kept.")) return;
+              updateClip(clip.id, {
+                status: "empty",
+                videoUrl: undefined,
+                thumbnailUrl: undefined,
+                generationTaskId: undefined,
+                lastError: undefined,
+              });
+            }}
+            title="Clear this clip's video — keeps source and prompt"
+          >
+            Clear clip
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
+type CanGenerate = { ok: true } | { ok: false; reason: string };
+
+function checkCanGenerate(
+  clip: Clip,
+  ctx: {
+    prompt: string;
+    imagePrompt: string;
+    avatarId: string | null;
+    avatarStatus: string;
+    songId: string | null;
+    audioUrl: string | null;
+    lookbook: string[];
+    characterImage: string | null;
+    hasPrev: boolean;
+  },
+): CanGenerate {
+  if (clip.source === "aleph") {
+    if (!clip.videoUrl) return { ok: false, reason: "Aleph needs an existing clip — generate one first" };
+    if (!ctx.prompt.trim()) return { ok: false, reason: "Aleph needs a prompt describing the transformation" };
+    return { ok: true };
+  }
+  if (clip.source === "lipSync") {
+    if (!ctx.avatarId) {
+      if (ctx.avatarStatus === "creating") return { ok: false, reason: "Avatar is being created — hang tight…" };
+      if (ctx.avatarStatus === "failed") return { ok: false, reason: "Avatar creation failed — try re-uploading the character image" };
+      return { ok: false, reason: "Upload a character image first (Character panel)" };
+    }
+    if (!ctx.songId || !ctx.audioUrl) return { ok: false, reason: "Lip-Sync needs a loaded song" };
+    return { ok: true };
+  }
+  if (clip.source === "archetype") {
+    if (!(clip.archetypeUrl ?? ctx.lookbook[0])) return { ok: false, reason: "Add a lookbook image first" };
+    return { ok: true };
+  }
+  if (clip.source === "generated" || clip.source === "textToVideo") {
+    // No prompt required — generation falls back to the auto-default
+    // ("section, energy x, cinematic") when blank.
+    return { ok: true };
+  }
+  if (clip.source === "library") {
+    // The library picker applies the videoUrl directly; the Generate button
+    // isn't even shown for this source. Always ok.
+    return { ok: true };
+  }
+  if (clip.source === "continue") {
+    // Seed comes from the previous clip's last frame; the character image is
+    // only a fallback for the very first clip on the timeline.
+    if (ctx.hasPrev) return { ok: true };
+    if (!ctx.characterImage) {
+      return { ok: false, reason: "First clip needs a previous clip or a character image to seed from" };
+    }
+    return { ok: true };
+  }
+  if (!ctx.characterImage) return { ok: false, reason: "Upload a character image first" };
+  return { ok: true };
+}
+
+function SourcePicker({
+  clip,
+  effectiveModel,
+  showModelPicker,
+  lookbook,
+  canBridge,
+  onSourceChange,
+  onModelChange,
+  onBridgeChange,
+  onUpdateClip,
+}: {
+  clip: Clip;
+  effectiveModel: GenerationModel;
+  showModelPicker: boolean;
+  lookbook: string[];
+  canBridge: boolean;
+  onSourceChange: (source: Clip["source"]) => void;
+  onModelChange: (model: GenerationModel) => void;
+  onBridgeChange: (on: boolean) => void;
+  onUpdateClip: (id: string, patch: Partial<Clip>) => void;
+}) {
+  return (
+    <div className="option-group">
+      <div className="label">Source</div>
+      <div className="select-wrap">
+        <select
+          className="select"
+          value={clip.source}
+          onChange={(e) => onSourceChange(e.target.value as Clip["source"])}
+        >
+          {SOURCES.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <span className="select-chevron">▾</span>
+      </div>
+      <div className="select-desc">
+        {SOURCES.find((s) => s.value === clip.source)?.desc}
+      </div>
+
+      {showModelPicker && (
+        <div className="model-picker">
+          {modelsForSource(clip.source).map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              className={`model-chip${effectiveModel === m.value ? " active" : ""}`}
+              onClick={() => onModelChange(m.value)}
+              title={m.desc}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {canBridge && (
+        <label className="continuity-toggle">
+          <input
+            type="checkbox"
+            checked={clip.bridge ?? false}
+            onChange={(e) => onBridgeChange(e.target.checked)}
+          />
+          <span>Bridge between neighbors</span>
+          <span className="select-desc">
+            interpolate from prev's last frame to next's first frame
+          </span>
+        </label>
+      )}
+
+      {clip.source === "archetype" && (
+        <div className="archetype-picker">
+          <ArchetypeGrid
+            lookbook={lookbook}
+            archetypeUrl={clip.archetypeUrl}
+            onPick={(url) => onUpdateClip(clip.id, { archetypeUrl: url })}
+            onClear={() => onUpdateClip(clip.id, { archetypeUrl: undefined })}
+          />
+          <div className="archetype-hint">
+            Pick a lookbook image or drop a one-off seed for this clip only.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ArchetypeGrid({
+  lookbook,
+  archetypeUrl,
+  onPick,
+  onClear,
+}: {
+  lookbook: string[];
+  archetypeUrl: string | undefined;
+  onPick: (url: string) => void;
+  onClear: () => void;
+}) {
+  // Include the per-clip override (if any) as an extra tile so it's visible
+  // in the same grid alongside the lookbook.
+  const customUrl = archetypeUrl && !lookbook.includes(archetypeUrl) ? archetypeUrl : null;
+  const tiles = customUrl ? [...lookbook, customUrl] : lookbook;
+  const effective = archetypeUrl ?? lookbook[0];
+
+  if (tiles.length === 0) {
+    return (
+      <div className="archetype-grid">
+        <AssetUploader className="archetype-tile add" onUploaded={onPick}>
+          <span className="tile-add-label">+</span>
+        </AssetUploader>
+        <div className="archetype-empty">Add lookbook images on the left, or drop a custom seed here.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="archetype-grid">
+      {tiles.map((url) => {
+        const selected = effective === url;
+        const isCustom = url === customUrl;
+        return (
+          <div key={url} className={`archetype-tile-wrap${isCustom ? " custom" : ""}`}>
+            <button
+              type="button"
+              className={`archetype-tile${selected ? " selected" : ""}`}
+              style={{ backgroundImage: `url(${url})` }}
+              onClick={() => onPick(url)}
+              aria-label={isCustom ? "select custom seed" : "select archetype"}
+            />
+            {isCustom && (
+              <button
+                type="button"
+                className="archetype-clear"
+                onClick={onClear}
+                title="remove custom seed"
+                aria-label="remove custom seed"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        );
+      })}
+      <AssetUploader className="archetype-tile add" onUploaded={onPick}>
+        <span className="tile-add-label">+</span>
+      </AssetUploader>
+    </div>
+  );
+}
+
+function SavedClipPicker({
+  currentVideoUrl,
+  onPick,
+}: {
+  currentVideoUrl: string | undefined;
+  onPick: (clip: SavedClip) => void;
+}) {
+  const [clips, setClips] = useState<SavedClip[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = () => {
+    setLoading(true);
+    setError(null);
+    listSavedClips()
+      .then(setClips)
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setLoading(false));
+  };
+
+  // Load on mount; not on every render — picker re-fetches via the refresh button.
+  useEffect(refresh, []);
+
+  return (
+    <div className="option-group">
+      <div className="label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>Saved clips</span>
+        <button type="button" className="add" onClick={refresh} disabled={loading}>
+          {loading ? "…" : "refresh"}
+        </button>
+      </div>
+      {error && <div className="cast-error">{error}</div>}
+      {clips && clips.length === 0 && !error && (
+        <div className="archetype-empty">
+          No saved clips yet. Generated clips get saved here automatically — generate one and it'll appear.
+        </div>
+      )}
+      {clips && clips.length > 0 && (
+        <div className="saved-clip-list">
+          {clips.map((c) => {
+            const selected = c.videoUrl === currentVideoUrl;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                className={`saved-clip-item${selected ? " selected" : ""}`}
+                onClick={() => onPick(c)}
+                title={selected ? "currently applied — click to re-apply" : "apply to this segment"}
+              >
+                <video
+                  className="saved-clip-thumb"
+                  src={c.videoUrl}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  onMouseEnter={(e) => (e.currentTarget as HTMLVideoElement).play().catch(() => {})}
+                  onMouseLeave={(e) => {
+                    const v = e.currentTarget as HTMLVideoElement;
+                    v.pause();
+                    v.currentTime = 0;
+                  }}
+                />
+                <div className="saved-clip-meta">
+                  <div className="saved-clip-name">{c.name}</div>
+                  <div className="saved-clip-sub">
+                    {c.duration.toFixed(1)}s · {c.source}
+                    {c.sectionLabel ? ` · ${c.sectionLabel}` : ""}
+                  </div>
+                </div>
+                {selected && <span className="saved-clip-tick">✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function avgRms(curve: number[], start: number, end: number, duration: number): number {
+  if (!curve.length) return 0;
+  const i0 = Math.max(0, Math.floor((start / duration) * curve.length));
+  const i1 = Math.min(curve.length, Math.ceil((end / duration) * curve.length));
+  if (i1 <= i0) return curve[i0] ?? 0;
+  let s = 0;
+  for (let i = i0; i < i1; i++) s += curve[i] ?? 0;
+  return s / (i1 - i0);
+}
