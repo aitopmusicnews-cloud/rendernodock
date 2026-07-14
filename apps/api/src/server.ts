@@ -48,7 +48,7 @@ import {
 const SafeId = z
   .string()
   .min(1)
-  .max(100)
+  .max(500)
   .regex(/^[a-zA-Z0-9_-]+$/, "id contains invalid characters");
 
 const urlOrPath = z.string().min(1);
@@ -57,6 +57,7 @@ const app = Fastify({
   logger: { level: "info" },
   bodyLimit: 100 * 1024 * 1024,
   ignoreTrailingSlash: true,
+  maxParamLength: 500,
 });
 
 // WEB_ORIGIN may be a single URL or a comma-separated list. The list form is
@@ -127,6 +128,22 @@ app.setNotFoundHandler((req, reply) => {
   }
 
   return reply.code(404).send({ error: "not found" });
+});
+
+app.addHook("preHandler", async (req, reply) => {
+  if (config.API_AUTH_TOKEN && req.url.startsWith("/api/")) {
+    const authHeader = req.headers.authorization;
+    let token = "";
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.substring(7);
+    }
+    if (!token) {
+      token = (req.query as Record<string, string>)?.token || "";
+    }
+    if (token !== config.API_AUTH_TOKEN) {
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
+  }
 });
 
 app.setErrorHandler((err: any, req, reply) => {
@@ -236,6 +253,19 @@ function resolvePublicUrl(req: any, publicUrl: string): string {
   return resolved;
 }
 
+const activeAnalysisRuns = new Set<Promise<any>>();
+
+const gracefulShutdown = async () => {
+  app.log.info("SIGTERM/SIGINT received. Waiting for active background tasks to finish...");
+  if (activeAnalysisRuns.size > 0) {
+    await Promise.allSettled(Array.from(activeAnalysisRuns));
+  }
+  await app.close();
+  process.exit(0);
+};
+process.on("SIGTERM", gracefulShutdown);
+process.on("SIGINT", gracefulShutdown);
+
 // Songs ----------------------------------------------------------------
 
 app.post("/api/songs/upload", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
@@ -260,10 +290,16 @@ app.post("/api/songs/upload", { config: { rateLimit: { max: 10, timeWindow: "1 m
   await clearAnalysisError(id);
 
   // Kick off analysis async; client polls /api/songs/:id/analysis.
-  analyzeFromUrl(id, resolvedUrl).catch(async (err) => {
-    app.log.error({ err }, "analysis failed");
-    await writeAnalysisError(id, String(err?.message ?? err));
-  });
+  const analysisPromise = analyzeFromUrl(id, resolvedUrl)
+    .then(() => {
+      activeAnalysisRuns.delete(analysisPromise);
+    })
+    .catch(async (err) => {
+      activeAnalysisRuns.delete(analysisPromise);
+      app.log.error({ err }, "analysis failed");
+      await writeAnalysisError(id, String(err?.message ?? err));
+    });
+  activeAnalysisRuns.add(analysisPromise);
 
   return reply.send({ id, audioUrl: resolvedUrl, filename: file.filename });
 });
@@ -619,7 +655,7 @@ app.delete("/api/library/folders/:id", async (req, reply) => {
   return reply.send({ ok: true });
 });
 
-const port = config.PORT;
+const port = process.env.PORT ? Number(process.env.PORT) : config.PORT;
 app.listen({ port, host: "0.0.0.0" }).then(() => {
-  app.log.info(`api listening on http://localhost:${port}`);
+  app.log.info(`api listening on port ${port}`);
 });
