@@ -4,8 +4,9 @@ import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { z } from "zod";
-import { join, resolve } from "node:path";
-import { existsSync, appendFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { existsSync, appendFileSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import {
   saveUpload,
@@ -48,7 +49,7 @@ import {
 const SafeId = z
   .string()
   .min(1)
-  .max(100)
+  .max(500)
   .regex(/^[a-zA-Z0-9_-]+$/, "id contains invalid characters");
 
 const urlOrPath = z.string().min(1);
@@ -57,6 +58,7 @@ const app = Fastify({
   logger: { level: "info" },
   bodyLimit: 100 * 1024 * 1024,
   ignoreTrailingSlash: true,
+  maxParamLength: 500,
 });
 
 // WEB_ORIGIN may be a single URL or a comma-separated list. The list form is
@@ -91,25 +93,97 @@ await app.register(fastifyStatic, {
   decorateReply: false,
 });
 
-// In production, the same container also serves the built SPA at `/`. The
-// Dockerfile copies apps/web/dist into /app/web. If WEB_DIST_DIR isn't set or
-// the directory doesn't exist (local dev), the registration is skipped — Vite
-// is the dev server and proxies /api here.
-const webDistDir = config.WEB_DIST_DIR;
-const webDistResolved = webDistDir ? resolve(webDistDir) : null;
+// Resolve the SPA assets directory (apps/web/dist).
+// In production, the same container serves the built SPA at `/`.
+// We attempt to resolve the directory using several standard fallback paths
+// to handle different current working directories (e.g. monorepo root vs apps/api workspace directory).
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+let webDistResolved: string | null = null;
+const possibleDirs = [
+  config.WEB_DIST_DIR,
+  resolve(join(__dirname, "..", "..", "web", "dist")), // if inside apps/api/dist or apps/api/src
+  resolve(join(__dirname, "..", "web")),               // if inside /app/dist (Docker runtime)
+  resolve(join(__dirname, "..", "web", "dist")),        // other potential nesting
+  "apps/web/dist",
+  "../web/dist",
+  "../../apps/web/dist"
+].filter(Boolean) as string[];
+
+for (const dir of possibleDirs) {
+  // Try resolving as-is (e.g. absolute, or relative to process.cwd())
+  const p1 = resolve(dir);
+  if (existsSync(p1) && statSync(p1).isDirectory()) {
+    webDistResolved = p1;
+    break;
+  }
+  // Try resolving relative to monorepo root if we are nested in apps/api
+  const p2 = resolve(join(process.cwd(), "..", "..", dir));
+  if (existsSync(p2) && statSync(p2).isDirectory()) {
+    webDistResolved = p2;
+    break;
+  }
+  // Try resolving relative to parent directory
+  const p3 = resolve(join(process.cwd(), "..", dir));
+  if (existsSync(p3) && statSync(p3).isDirectory()) {
+    webDistResolved = p3;
+    break;
+  }
+}
+
 const serveSpa = !!(webDistResolved && existsSync(webDistResolved));
 if (serveSpa) {
+  app.log.info(`[Static Assets] Serving SPA from resolved directory: "${webDistResolved}"`);
   await app.register(fastifyStatic, {
     root: webDistResolved!,
     prefix: "/",
     decorateReply: true,
     wildcard: false,
   });
+} else {
+  app.log.warn(
+    `[Static Assets] SPA serving is disabled because no valid web distribution directory was found. ` +
+    `Tried directories: ${JSON.stringify(possibleDirs)} relative to Process CWD: "${process.cwd()}"`
+  );
 }
 
-// SPA history-mode fallback or API not-found handler.
-// Handles API/storage requests gracefully (returns JSON 404),
-// and falls back to index.html for client-side routing in SPA production mode.
+// Custom SPA router catch-all for GET requests.
+// Handles serving actual files (like .js, .css, images etc.) if they exist,
+// and falls back to serving index.html for any frontend client-side routes.
+app.get("/*", async (req, reply) => {
+  const urlLower = req.url.toLowerCase();
+  
+  // Exclude API or storage requests from matching the SPA router
+  const isApiOrStorage =
+    urlLower.startsWith("/api/") ||
+    urlLower.startsWith("/storage/") ||
+    urlLower.includes("/api/") ||
+    urlLower.includes("/storage/");
+
+  if (isApiOrStorage) {
+    return reply.code(404).send({ error: `Route ${req.method} ${req.url} not found` });
+  }
+
+  const distDir = webDistResolved;
+  if (serveSpa && distDir) {
+    // Strip query parameters to get the clean file path (type-safe for noUncheckedIndexedAccess)
+    const urlPath = req.url.split("?")[0] ?? "/";
+    
+    // Check if the requested file exists in the resolved web dist directory
+    const targetFile = join(distDir, urlPath);
+    if (existsSync(targetFile) && statSync(targetFile).isFile()) {
+      return reply.sendFile(urlPath);
+    }
+    
+    // If it does not exist on disk, fall back to index.html to support SPA routing
+    return reply.sendFile("index.html");
+  }
+
+  return reply.code(404).send({ error: "not found" });
+});
+
+// Non-GET not-found fallback. Handles other methods (POST, PUT, DELETE, etc.) gracefully.
 app.setNotFoundHandler((req, reply) => {
   const urlLower = req.url.toLowerCase();
   const isApiOrStorage =
@@ -122,11 +196,29 @@ app.setNotFoundHandler((req, reply) => {
     return reply.code(404).send({ error: `Route ${req.method} ${req.url} not found` });
   }
 
-  if (serveSpa) {
+  // If it's a GET request that somehow triggered the not-found handler (e.g. if the wildcard route didn't catch it)
+  if (req.method === "GET" && serveSpa) {
     return reply.sendFile("index.html");
   }
 
   return reply.code(404).send({ error: "not found" });
+});
+
+app.addHook("preHandler", async (req, reply) => {
+  const authToken = (config as any).API_AUTH_TOKEN;
+  if (authToken && req.url.startsWith("/api/")) {
+    const authHeader = req.headers.authorization;
+    let token = "";
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.substring(7);
+    }
+    if (!token) {
+      token = (req.query as Record<string, string>)?.token || "";
+    }
+    if (token !== authToken) {
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
+  }
 });
 
 app.setErrorHandler((err: any, req, reply) => {
@@ -236,6 +328,19 @@ function resolvePublicUrl(req: any, publicUrl: string): string {
   return resolved;
 }
 
+const activeAnalysisRuns = new Set<Promise<any>>();
+
+const gracefulShutdown = async () => {
+  app.log.info("SIGTERM/SIGINT received. Waiting for active background tasks to finish...");
+  if (activeAnalysisRuns.size > 0) {
+    await Promise.allSettled(Array.from(activeAnalysisRuns));
+  }
+  await app.close();
+  process.exit(0);
+};
+process.on("SIGTERM", gracefulShutdown);
+process.on("SIGINT", gracefulShutdown);
+
 // Songs ----------------------------------------------------------------
 
 app.post("/api/songs/upload", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
@@ -260,10 +365,16 @@ app.post("/api/songs/upload", { config: { rateLimit: { max: 10, timeWindow: "1 m
   await clearAnalysisError(id);
 
   // Kick off analysis async; client polls /api/songs/:id/analysis.
-  analyzeFromUrl(id, resolvedUrl).catch(async (err) => {
-    app.log.error({ err }, "analysis failed");
-    await writeAnalysisError(id, String(err?.message ?? err));
-  });
+  const analysisPromise = analyzeFromUrl(id, resolvedUrl)
+    .then(() => {
+      activeAnalysisRuns.delete(analysisPromise);
+    })
+    .catch(async (err) => {
+      activeAnalysisRuns.delete(analysisPromise);
+      app.log.error({ err }, "analysis failed");
+      await writeAnalysisError(id, String(err?.message ?? err));
+    });
+  activeAnalysisRuns.add(analysisPromise);
 
   return reply.send({ id, audioUrl: resolvedUrl, filename: file.filename });
 });
@@ -619,7 +730,7 @@ app.delete("/api/library/folders/:id", async (req, reply) => {
   return reply.send({ ok: true });
 });
 
-const port = config.PORT;
+const port = process.env.PORT ? Number(process.env.PORT) : config.PORT;
 app.listen({ port, host: "0.0.0.0" }).then(() => {
-  app.log.info(`api listening on http://localhost:${port}`);
+  app.log.info(`api listening on port ${port}`);
 });
