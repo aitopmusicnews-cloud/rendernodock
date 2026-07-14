@@ -1,0 +1,24 @@
+{
+  "name": "music-video-studio",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "packages/shared"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -p \"[{name}]\" -n \"api,web\" -c \"yellow,cyan\" \"PORT=3001 npm run dev:api\" \"PORT=3000 npm run dev:web\"",
+    "dev:api": "npm run dev --workspace=@mvs/api",
+    "dev:web": "npm run dev --workspace=@mvs/web",
+    "build": "npm run build --workspace=@mvs/web && npm run build --workspace=@mvs/api",
+    "start": "npm run start --workspace=@mvs/api",
+    "lint": "npm run typecheck --workspaces"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  },
+  "dependencies": {
+    "@fal-ai/client": "^1.10.1"
+  }
+}
