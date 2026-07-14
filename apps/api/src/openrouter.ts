@@ -586,18 +586,19 @@ async function callLocalInference(
 }
 
 export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouterTask> {
-  const promptText = await enhancePromptIfNeeded(req.promptText ?? "");
-
-  // ADDED: Intercept request and route to Modal if LTX is selected
+  // If LTX is selected, use the raw prompt directly and bypass prompt enhancement!
   if (req.model === "ltx-video") {
     try {
+      const rawPrompt = req.promptText ?? "";
       const duration = req.duration ?? 4;
-      const videoUrl = await generateLTXVideo(promptText, duration);
+      const videoUrl = await generateLTXVideo(rawPrompt, duration);
       return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
     } catch (err: any) {
       console.error("[LTX Image-To-Video Generation Error] Failed running Modal: ", err);
     }
   }
+
+  const promptText = await enhancePromptIfNeeded(req.promptText ?? "");
 
   // If self-hosted local inference is configured, call it!
   if (config.LOCAL_INFERENCE_URL) {
@@ -622,20 +623,21 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouter
 }
 
 export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTask> {
-  const promptText = await enhancePromptIfNeeded(req.promptText);
-
-  // ADDED: Intercept request and route to Modal if LTX is selected
+  // If LTX is selected, use the raw prompt and completely bypass the enhancer!
   if (req.model === "ltx-video") {
     try {
+      const rawPrompt = req.promptText; 
       const duration = req.duration ?? 4;
-      const videoUrl = await generateLTXVideo(promptText, duration);
+      const videoUrl = await generateLTXVideo(rawPrompt, duration);
       return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
     } catch (err: any) {
       console.error("[LTX Text-To-Video Generation Error] Failed running Modal: ", err);
     }
   }
 
-  // If self-hosted local inference is configured, call it!
+  // Otherwise, fall back to the prompt enhancer for other models
+  const promptText = await enhancePromptIfNeeded(req.promptText);
+
   if (config.LOCAL_INFERENCE_URL) {
     try {
       const videoUrl = await callLocalInference("video", promptText, {
@@ -650,7 +652,6 @@ export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTa
     }
   }
 
-  // Generate dynamic, high-fashion layout via OpenRouter / Procedural pipeline
   const videoUrl = await generateProceduralAsset(promptText, "video");
   return { id: encodeTaskId({ source: "openrouter", id: videoUrl }) };
 }
