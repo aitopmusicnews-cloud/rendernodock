@@ -30,7 +30,7 @@ image = (
 
 with image.imports():
     import torch
-    from diffusers import LTXVideoPipeline
+    from diffusers import LTXPipeline
     from diffusers.utils import export_to_video
 
 @app.cls(
@@ -42,7 +42,7 @@ with image.imports():
 class LTXGenerator:
     @modal.enter()
     def load_model(self):
-        self.pipe = LTXVideoPipeline.from_pretrained(
+        self.pipe = LTXVPipeline.from_pretrained(
             "Lightricks/LTX-Video",
             torch_dtype=torch.bfloat16,
         ).to("cuda")
