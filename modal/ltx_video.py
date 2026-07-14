@@ -57,9 +57,14 @@ class LTXGenerator:
         num_frames = ((num_frames - 1) // 8) * 8 + 1
         num_frames = max(9, min(num_frames, 97))
 
+        # Defining a strict negative prompt keeps visual fidelity high
+        negative_prompt = "worst quality, blurry, distorted, low resolution, static, cartoon, low-fidelity"
+
         video_frames = self.pipe(
             prompt=prompt,
-            num_inference_steps=25,
+            negative_prompt=negative_prompt,
+            num_inference_steps=30,  # Increased steps for finer details like steam/smoke
+            guidance_scale=3.5,     # CRITICAL: Forces the model to strictly follow your prompt details
             num_frames=num_frames,
             height=320,
             width=512,
