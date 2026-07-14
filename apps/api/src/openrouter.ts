@@ -13,7 +13,7 @@ import { config } from "./config.js";
 import { resolveLocalPath, mimeType } from "./paths.js";
 import { runFfmpeg } from "./ffmpeg.js";
 import { storage } from "./storage.js";
-// ADDED: Import the custom LTX function we defined in clips.ts
+// Import the custom LTX function defined in clips.ts
 import { generateLTXVideo } from "./clips.js";
 
 // OpenRouter client helper to query LLM
