@@ -16,6 +16,7 @@ const Env = z.object({
   OPENROUTER_MODEL: optionalNonEmpty.optional(),
   LOCAL_INFERENCE_URL: optionalUrl.optional(),
   MODAL_AUDIO_URL: optionalUrl.optional(),
+  MODAL_LTX_URL: optionalUrl.optional(), // ADDED: Registers LTX-Video variable
   PORT: z.coerce.number().default(3001),
   PUBLIC_BASE_URL: z.string().url().default("http://localhost:3001"),
   // Comma-separated list of allowed CORS origins (or a single URL).
@@ -39,8 +40,8 @@ const Env = z.object({
    * When unset, virtual-hosted-style S3 URLs are used. */
   S3_PUBLIC_URL_BASE: optionalUrl.optional(),
   /** Directory holding the built SPA (apps/web/dist) to serve from `/`.
-   *  In the production Docker image this is set to /app/web; locally it can
-   *  stay unset and Vite handles the SPA in dev. */
+   * In the production Docker image this is set to /app/web; locally it can
+   * stay unset and Vite handles the SPA in dev. */
   WEB_DIST_DIR: optionalNonEmpty.optional(),
 });
 
@@ -68,6 +69,14 @@ if (!config.OPENROUTER_API_KEY) {
     "INFO: OPENROUTER_API_KEY is not set. OpenRouter prompt enhancement will be disabled."
   );
 }
+
+// ADDED: Logs a warning if your LTX Video variable is missing
+if (!config.MODAL_LTX_URL) {
+  console.log(
+    "INFO: MODAL_LTX_URL is not set. Timeline requests for LTX Video will fall back."
+  );
+}
+
 if (!config.MODAL_AUDIO_URL) {
   console.log(
     "INFO: MODAL_AUDIO_URL is not set. Song uploads will analyze nothing. " +

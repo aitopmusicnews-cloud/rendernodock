@@ -13,6 +13,8 @@ import { config } from "./config.js";
 import { resolveLocalPath, mimeType } from "./paths.js";
 import { runFfmpeg } from "./ffmpeg.js";
 import { storage } from "./storage.js";
+// ADDED: Import the custom LTX function we defined in clips.ts
+import { generateLTXVideo } from "./clips.js";
 
 // OpenRouter client helper to query LLM
 export async function callOpenRouter(prompt: string, systemInstruction?: string, maxTokens: number = 3000): Promise<string> {
@@ -222,7 +224,6 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
       bgStart = "#090401";
       bgEnd = "#1f0a02";
       graphicOverlay = `
-        <!-- Glowing warm radial flare representing Zippo flame -->
         <circle cx="640" cy="360" r="220" fill="none" stroke="#f59e0b" stroke-width="1" opacity="0.1"/>
         <circle cx="640" cy="360" r="140" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="8,6" opacity="0.3"/>
         <path d="M640,160 Q600,280 640,460 Q680,280 640,160 Z" fill="#f59e0b" filter="url(#glowBlur)" opacity="0.6"/>
@@ -242,13 +243,11 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
       bgStart = "#0b0c10";
       bgEnd = "#1a1d24";
       graphicOverlay = `
-        <!-- Minimalist concrete vault lines -->
         <line x1="30" y1="30" x2="480" y2="250" stroke="#475569" stroke-width="1" stroke-dasharray="10,5" opacity="0.4"/>
         <line x1="1250" y1="30" x2="800" y2="250" stroke="#475569" stroke-width="1" stroke-dasharray="10,5" opacity="0.4"/>
         <line x1="30" y1="690" x2="480" y2="470" stroke="#475569" stroke-width="1" stroke-dasharray="10,5" opacity="0.4"/>
         <line x1="1250" y1="690" x2="800" y2="470" stroke="#475569" stroke-width="1" stroke-dasharray="10,5" opacity="0.4"/>
         <rect x="480" y="250" width="320" height="220" fill="none" stroke="#475569" stroke-width="1.5" opacity="0.6"/>
-        <!-- Obsidian throne silhouette -->
         <polygon points="590,440 690,440 670,300 610,300" fill="#020617" stroke="#94a3b8" stroke-width="2" opacity="0.95"/>
         <polygon points="560,450 720,450 700,440 580,440" fill="#0f172a" stroke="#475569" stroke-width="1"/>
       `;
@@ -264,7 +263,6 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
       bgStart = "#020617";
       bgEnd = "#0f172a";
       graphicOverlay = `
-        <!-- Technical blueprint schematics grid -->
         <pattern id="progrid" width="40" height="40" patternUnits="userSpaceOnUse">
           <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.8"/>
         </pattern>
@@ -285,14 +283,10 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
       bgStart = "#05010a";
       bgEnd = "#1c0d29";
       graphicOverlay = `
-        <!-- Deep dark bruised sky horizon and monoliths -->
         <line x1="30" y1="480" x2="1250" y2="480" stroke="#6b21a8" stroke-width="1.5" opacity="0.7"/>
-        <!-- Cracked concrete perspectives -->
         <line x1="640" y1="480" x2="100" y2="690" stroke="#4a044e" stroke-width="1" opacity="0.5"/>
         <line x1="640" y1="480" x2="1180" y2="690" stroke="#4a044e" stroke-width="1" opacity="0.5"/>
-        <!-- Left Monolith -->
         <polygon points="200,480 320,480 320,180 200,220" fill="#090114" stroke="#a855f7" stroke-width="1.5" opacity="0.9"/>
-        <!-- Right Monolith -->
         <polygon points="960,480 1080,480 1080,220 960,180" fill="#090114" stroke="#a855f7" stroke-width="1.5" opacity="0.9"/>
       `;
     } else if (
@@ -307,7 +301,6 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
       bgStart = "#030712";
       bgEnd = "#0f172a";
       graphicOverlay = `
-        <!-- Dual blinding vehicle headlights casting flares -->
         <ellipse cx="400" cy="360" rx="360" ry="10" fill="#ffffff" filter="url(#glowBlur)" opacity="0.4"/>
         <ellipse cx="880" cy="360" rx="360" ry="10" fill="#ffffff" filter="url(#glowBlur)" opacity="0.4"/>
         <circle cx="400" cy="360" r="12" fill="#ffffff"/>
@@ -326,7 +319,6 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
       bgStart = "#0d0202";
       bgEnd = "#270505";
       graphicOverlay = `
-        <!-- Fractured crack lines with fiery glow -->
         <path d="M30,360 L450,330 L640,440 L880,310 L1250,390" stroke="#f97316" stroke-width="3.5" stroke-linecap="round" filter="url(#glowBlur)" opacity="0.8"/>
         <path d="M30,360 L450,330 L640,440 L880,310 L1250,390" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/>
         <path d="M450,330 L410,120" stroke="#b91c1c" stroke-width="1.5" opacity="0.7"/>
@@ -345,7 +337,7 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
 
     const cleanPrompt = prompt.replace(/[<>&"]/g, "").substring(0, 75).toUpperCase();
     const svg = `
-      <svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg">
+      <svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)">
         <defs>
           <linearGradient id="prograd" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" style="stop-color:${bgStart};stop-opacity:1" />
@@ -363,14 +355,12 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
         
         ${graphicOverlay}
         
-        <!-- Minimalist outer border grid -->
         <rect x="30" y="30" width="1220" height="660" fill="none" stroke="${accentColor}" stroke-width="1" opacity="0.15"/>
         <line x1="30" y1="60" x2="60" y2="30" stroke="${accentColor}" stroke-width="1.5" opacity="0.6"/>
         <line x1="1250" y1="60" x2="1220" y2="30" stroke="${accentColor}" stroke-width="1.5" opacity="0.6"/>
         <line x1="30" y1="660" x2="60" y2="690" stroke="${accentColor}" stroke-width="1.5" opacity="0.6"/>
         <line x1="1250" y1="660" x2="1220" y2="690" stroke="${accentColor}" stroke-width="1.5" opacity="0.6"/>
 
-        <!-- Sleek monospaced details -->
         <text x="60" y="650" font-family="'Courier New', Courier, monospace" font-size="13" fill="${accentColor}" letter-spacing="3" opacity="0.8">${cleanPrompt ? `${cleanPrompt} // DIRECTIVE 140 BPM` : "KEEP EM' THIRSTY // DIRECTIVE 140 BPM"}</text>
         <text x="60" y="670" font-family="'Courier New', Courier, monospace" font-size="11" fill="#94a3b8" letter-spacing="1.5" opacity="0.5">SCENE CREATIVE // PROMPT: ${cleanPrompt}</text>
         <text x="1120" y="650" font-family="'Courier New', Courier, monospace" font-size="11" fill="#94a3b8" letter-spacing="2" opacity="0.4">LOCAL MODE</text>
@@ -595,10 +585,19 @@ async function callLocalInference(
   }
 }
 
-
-
 export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouterTask> {
   const promptText = await enhancePromptIfNeeded(req.promptText ?? "");
+
+  // ADDED: Intercept request and route to Modal if LTX is selected
+  if (req.model === "ltx-video") {
+    try {
+      const duration = req.duration ?? 4;
+      const videoUrl = await generateLTXVideo(promptText, duration);
+      return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
+    } catch (err: any) {
+      console.error("[LTX Image-To-Video Generation Error] Failed running Modal: ", err);
+    }
+  }
 
   // If self-hosted local inference is configured, call it!
   if (config.LOCAL_INFERENCE_URL) {
@@ -624,6 +623,17 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouter
 
 export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTask> {
   const promptText = await enhancePromptIfNeeded(req.promptText);
+
+  // ADDED: Intercept request and route to Modal if LTX is selected
+  if (req.model === "ltx-video") {
+    try {
+      const duration = req.duration ?? 4;
+      const videoUrl = await generateLTXVideo(promptText, duration);
+      return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
+    } catch (err: any) {
+      console.error("[LTX Text-To-Video Generation Error] Failed running Modal: ", err);
+    }
+  }
 
   // If self-hosted local inference is configured, call it!
   if (config.LOCAL_INFERENCE_URL) {
@@ -700,21 +710,21 @@ export async function listAvatars(): Promise<AvatarSummary[]> {
       id: "victoria",
       name: "Victoria (Chrome Neo-Noir)",
       status: "READY",
-      imageUri: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+      imageUri: "[https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80](https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80)",
       createdAt: new Date().toISOString(),
     },
     {
       id: "obsidian",
       name: "Obsidian (Cyber-Organic)",
       status: "READY",
-      imageUri: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80",
+      imageUri: "[https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80](https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80)",
       createdAt: new Date().toISOString(),
     },
     {
       id: "silver",
       name: "Silver (Minimalist)",
       status: "READY",
-      imageUri: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80",
+      imageUri: "[https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80](https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80)",
       createdAt: new Date().toISOString(),
     },
   ];
