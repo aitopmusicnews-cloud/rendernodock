@@ -24,8 +24,8 @@ image = (
         "pillow==11.1.0",
         "torch==2.6.0",
         "transformers==4.49.0",
-        "sentencepiece==0.2.0",  # ADDED: Solves the T5Tokenizer ImportError
-        "protobuf==5.29.3",     # ADDED: Handles text encoder serialization
+        "sentencepiece==0.2.0",  # Solves T5Tokenizer ImportError
+        "protobuf==5.29.3",     # Handles text encoder serialization
     )
     .env({"HF_HUB_CACHE": MODEL_DIR})
 )
@@ -57,17 +57,17 @@ class LTXGenerator:
         num_frames = ((num_frames - 1) // 8) * 8 + 1
         num_frames = max(9, min(num_frames, 97))
 
-        # Defining a strict negative prompt keeps visual fidelity high
-        negative_prompt = "worst quality, blurry, distorted, low resolution, static, cartoon, low-fidelity"
+        # Standard negative prompt to force realistic, high-fidelity styles
+        negative_prompt = "worst quality, blurry, distorted, low resolution, cartoon, abstract, static, draft"
 
         video_frames = self.pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
-            num_inference_steps=30,  # Increased steps for finer details like steam/smoke
-            guidance_scale=3.5,     # CRITICAL: Forces the model to strictly follow your prompt details
+            num_inference_steps=30,  # Optimal denoising steps
+            guidance_scale=4.5,     # Stronger alignment to detailed prompt descriptions
             num_frames=num_frames,
-            height=320,
-            width=512,
+            height=512,             # Native LTX-Video resolution height
+            width=768,              # Native LTX-Video resolution width
         ).frames[0]
 
         filename = f"ltx-{uuid.uuid4()}.mp4"
