@@ -649,7 +649,8 @@ app.get("/api/projects/:id", async (req, reply) => {
 });
 
 app.delete("/api/projects/:id", async (req, reply) => {
-  const params = z.object({ id: SafeId }).parse(params.id);
+  // FIXED: parse(req.params) instead of parse(params.id)
+  const params = z.object({ id: SafeId }).parse(req.params);
   const deleted = await deleteProject(params.id);
   if (!deleted) return reply.code(404).send({ error: "not found" });
   return reply.send({ ok: true });
