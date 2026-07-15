@@ -87,6 +87,7 @@ export function Sidebar() {
   const setPrompt = (value: string) => updateClip(clip.id, { prompt: value });
   const setImagePrompt = (value: string) => updateClip(clip.id, { imagePrompt: value });
   const setBridge = (on: boolean) => updateClip(clip.id, { bridge: on });
+  const setAudio = (on: boolean) => updateClip(clip.id, { enableAudio: on }); // ADDED: Persist audio toggle per clip
 
   const canBridge =
     clip.source === "continue" &&
@@ -133,6 +134,7 @@ export function Sidebar() {
       sectionLabel,
       energy,
       model: showModelPicker ? effectiveModel : undefined,
+      enableAudio: (clip as any).enableAudio ?? true, // ADDED: Safely bundle audio setting into dispatcher
       referenceImages: clip.source === "generated" ? lookbook.slice(0, 3) : undefined,
       bridge: canBridge && (clip.bridge ?? false) ? true : undefined,
     });
@@ -154,6 +156,7 @@ export function Sidebar() {
         onSourceChange={setSource}
         onModelChange={setModel}
         onBridgeChange={setBridge}
+        onAudioChange={setAudio} // ADDED: Pass audio handler down
         onUpdateClip={updateClip}
       />
 
@@ -338,6 +341,7 @@ function SourcePicker({
   onSourceChange,
   onModelChange,
   onBridgeChange,
+  onAudioChange, // ADDED
   onUpdateClip,
 }: {
   clip: Clip;
@@ -348,6 +352,7 @@ function SourcePicker({
   onSourceChange: (source: Clip["source"]) => void;
   onModelChange: (model: GenerationModel) => void;
   onBridgeChange: (on: boolean) => void;
+  onAudioChange: (on: boolean) => void; // ADDED
   onUpdateClip: (id: string, patch: Partial<Clip>) => void;
 }) {
   return (
@@ -385,6 +390,21 @@ function SourcePicker({
             </button>
           ))}
         </div>
+      )}
+
+      {/* ADDED: LTX-2.3 Native Environmental Audio Toggle Switch (Uses your existing sidebar classes) */}
+      {effectiveModel === "ltx-video" && showModelPicker && (
+        <label className="continuity-toggle" style={{ marginTop: "12px" }}>
+          <input
+            type="checkbox"
+            checked={(clip as any).enableAudio ?? true}
+            onChange={(e) => onAudioChange(e.target.checked)}
+          />
+          <span>Environmental Audio</span>
+          <span className="select-desc">
+            Generate physically synchronized ambient foley and sound effects (LTX-2.3)
+          </span>
+        </label>
       )}
 
       {canBridge && (

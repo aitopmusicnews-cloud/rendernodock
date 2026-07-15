@@ -118,7 +118,7 @@ export async function enhancePromptIfNeeded(promptText: string): Promise<string>
  * Sanitize an SVG string so native parsers (librsvg/libxml2 used by sharp)
  * don't choke on a corrupted namespace. The OpenRouter model sometimes wraps
  * the xmlns value in a markdown link, e.g.
- * xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)"
+ * xmlns="http://www.w3.org/2000/svg"
  * which is not a valid URI and triggers XML_ERR_INVALID_URI (glib parse error).
  * We also guarantee a well-formed, closed <svg> opening tag.
  */
@@ -266,7 +266,7 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
       bgEnd = "#1f0a02";
       graphicOverlay = `
         <circle cx="640" cy="360" r="220" fill="none" stroke="#f59e0b" stroke-width="1" opacity="0.1"/>
-        <circle cx="640" cy="360" r="140" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="8,6" opacity="0.3"/>
+        <circle cx="640" cy="360" r="140" fill="none" stroke="#f59e0b" stroke-dasharray="8,6" opacity="0.3"/>
         <path d="M640,160 Q600,280 640,460 Q680,280 640,160 Z" fill="#f59e0b" filter="url(#glowBlur)" opacity="0.6"/>
         <path d="M640,210 Q615,290 640,430 Q665,290 640,210 Z" fill="#ea580c" opacity="0.7"/>
         <path d="M640,260 Q625,310 640,410 Q655,310 640,260 Z" fill="#fff7ed" opacity="0.9"/>
@@ -640,6 +640,8 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouter
   // ROUTE B: Direct HTTP Fetch directly to LTX-Video Modal
   try {
     let promptToUse = req.promptText ?? "";
+    const enableAudio = (req as any).enableAudio !== false; // ADDED: Read audio toggle context
+
     if (config.OPENROUTER_API_KEY && config.OPENROUTER_API_KEY !== "missing-OPENROUTER_API_KEY" && promptToUse.trim()) {
       try {
         promptToUse = await enhancePromptForLTX(promptToUse);
@@ -648,8 +650,13 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouter
         console.log("[OpenRouter LTX] Prompt enhancement failed, utilizing raw.");
       }
     }
-    const duration = req.duration ?? 4;
 
+    // ADDED: Prompt engineering fallback to force silence if environmental sounds are turned off
+    if (!enableAudio) {
+      promptToUse = `${promptToUse} (completely silent, no background sound, quiet, mute)`;
+    }
+
+    const duration = req.duration ?? 4;
     const modalUrl = config.MODAL_LTX_URL || "[https://cdtfullsail--mvs-ltx-video-generate.modal.run](https://cdtfullsail--mvs-ltx-video-generate.modal.run)";
     console.log(`[Direct LTX Route] Sending request to Modal at: ${modalUrl}`);
 
@@ -688,6 +695,8 @@ export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTa
   // ROUTE B: Direct HTTP Fetch directly to LTX-Video Modal
   try {
     let promptToUse = req.promptText ?? "";
+    const enableAudio = (req as any).enableAudio !== false; // ADDED: Read audio toggle context
+
     if (config.OPENROUTER_API_KEY && config.OPENROUTER_API_KEY !== "missing-OPENROUTER_API_KEY" && promptToUse.trim()) {
       try {
         promptToUse = await enhancePromptForLTX(promptToUse);
@@ -696,8 +705,13 @@ export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTa
         console.log("[OpenRouter LTX] Prompt enhancement failed, utilizing raw.");
       }
     }
-    const duration = req.duration ?? 4;
 
+    // ADDED: Prompt engineering fallback to force silence if environmental sounds are turned off
+    if (!enableAudio) {
+      promptToUse = `${promptToUse} (completely silent, no background sound, quiet, mute)`;
+    }
+
+    const duration = req.duration ?? 4;
     const modalUrl = config.MODAL_LTX_URL || "[https://cdtfullsail--mvs-ltx-video-generate.modal.run](https://cdtfullsail--mvs-ltx-video-generate.modal.run)";
     console.log(`[Direct LTX Route] Sending request to Modal at: ${modalUrl}`);
 
