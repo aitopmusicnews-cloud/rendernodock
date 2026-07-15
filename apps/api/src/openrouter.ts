@@ -97,6 +97,30 @@ export async function enhancePromptIfNeeded(promptText: string): Promise<string>
   }
 }
 
+/**
+ * Sanitize an SVG string so native parsers (librsvg/libxml2 used by sharp)
+ * don't choke on a corrupted namespace. The OpenRouter model sometimes wraps
+ * the xmlns value in a markdown link, e.g.
+ *   xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)"
+ * which is not a valid URI and triggers XML_ERR_INVALID_URI (glib parse error).
+ * We also guarantee a well-formed, closed <svg> opening tag.
+ */
+function fixSvgXmlns(svg: string): string {
+  let out = svg;
+  // Strip markdown-link wrappers from any xmlns / xlink declaration value.
+  out = out.replace(
+    /(xmlns(:[a-zA-Z0-9_-]+)?\s*=\s*")\[([^\]]+)\]\(([^)]+)\)(")/g,
+    (_m, open, _ns, _label, uri, close) => `${open}${uri}${close}`
+  );
+  // Ensure a valid SVG namespace is present.
+  if (!/xmlns\s*=/.test(out)) {
+    out = out.replace(/<svg\b/, '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  // Ensure the <svg ...> opening tag is actually closed with '>'.
+  out = out.replace(/<svg([^>]*?)\n\s*</, (_m, attrs) => `<svg${attrs.trimEnd()}><`);
+  return out;
+}
+
 export async function generateSvgWithOpenRouter(prompt: string): Promise<string | null> {
   if (!config.OPENROUTER_API_KEY || config.OPENROUTER_API_KEY === "missing-OPENROUTER_API_KEY") {
     return null;
@@ -195,7 +219,7 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
 
   if (customSvg) {
     try {
-      pngBuffer = await sharp(Buffer.from(customSvg)).png().toBuffer();
+      pngBuffer = await sharp(Buffer.from(fixSvgXmlns(customSvg))).png().toBuffer();
       console.log("[OpenRouter SVG] Successfully rendered dynamic SVG from prompt.");
     } catch (err) {
       console.log("[OpenRouter SVG] Sharp render fallback activated.");
@@ -337,9 +361,9 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
 
     const cleanPrompt = prompt.replace(/[<>&"]/g, "").substring(0, 75).toUpperCase();
     
-    // FIXED: Removed corrupt markdown link structure inside the xmlns property
+    // FIXED: Use a valid SVG namespace URI and close the <svg> tag
     const svg = `
-      <svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)">
+      <svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <linearGradient id="prograd" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" style="stop-color:${bgStart};stop-opacity:1" />
@@ -370,9 +394,17 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
     `;
 
     // Render SVG to Buffer
-    pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+    try {
+      pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+    } catch (err) {
+      console.error("[Procedural SVG] Sharp render failed:", (err as Error)?.message || err);
+    }
   }
-  
+
+  if (!pngBuffer) {
+    return Promise.reject(new Error("Failed to render procedural asset: SVG rasterization produced no image."));
+  }
+
   // Save to storage
   const filename = `procedural_${Date.now()}.png`;
   const { publicUrl, id } = await storage.saveUpload(pngBuffer, filename, "image/png");
