@@ -69,16 +69,16 @@ export async function callOpenRouter(prompt: string, systemInstruction?: string,
   return content.trim();
 }
 
-// ADDED: Dedicated prompt engineer specifically optimized for LTX-Video's physical attention model
+// Dedicated prompt engineer specifically optimized for LTX-Video's physical attention model
 export async function enhancePromptForLTX(promptText: string): Promise<string> {
   const systemPrompt = `You are an elite cinematic prompt engineer specialized in structuring inputs for LTX-Video (a highly physical text-to-video diffusion model).
 Your job is to rewrite the user's basic description into a highly detailed, single-paragraph prompt optimized for physics and visual coherence.
 
 Follow this strict structural sequence:
-1. MAIN SOLID SUBJECT & DIRECT ACTION: Start with the primary solid object and what it is physically doing (e.g., "A luxury sports car engine idling").
-2. CAMERA COMPOSITION & MOTION: Describe the camera's lens, framing, and movement (e.g., "panning shot, camera tracking past, shot on 35mm anamorphic lens, shallow depth of field").
-3. SETTING & LIGHTING: Describe the environment and specific light sources (e.g., "dark concrete alleyway, wet walls, glowing red taillights casting an amber hue").
-4. ATMOSPHERIC DETAILS (ALWAYS PLACE LAST): Describe fluids, smoke, weather, or particles at the absolute end of the prompt (e.g., "gently swirling white exhaust smoke, rain-slicked asphalt reflections"). If placed early, the model will fail and render only smoke.
+1. MAIN SOLID SUBJECT & DIRECT ACTION: Start with the primary solid object and what it is physically doing (e.g., "A luxury sports car engine idling", "A desolate Oakland street intersection at night").
+2. CAMERA COMPOSITION & MOTION: Describe the camera's lens, framing, and movement (e.g., "ultra-slow low-to-the-ground forward camera drift, minor handheld organic jitter, shot on 16mm anamorphic lens").
+3. SETTING & LIGHTING: Describe the environment and specific light sources (e.g., "dark street intersection, wet asphalt, amber streetlights, flickering sodium vapor lamp").
+4. ATMOSPHERIC DETAILS (ALWAYS PLACE LAST): Describe fluids, smoke, weather, or particles at the absolute end of the prompt (e.g., "thick white fog slowly rolling in from the background, rain-slicked asphalt reflections"). If placed early, the model will fail and render only fog or smoke.
 
 CRITICAL RULES:
 - Output only the final single paragraph under 250 characters.
@@ -639,91 +639,44 @@ async function callLocalInference(
 }
 
 export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouterTask> {
-  // If LTX is selected, perform dedicated, highly structured prompt enhancement first!
-  if (req.model === "ltx-video") {
-    try {
-      let promptToUse = req.promptText ?? "";
-      if (config.OPENROUTER_API_KEY && config.OPENROUTER_API_KEY !== "missing-OPENROUTER_API_KEY" && promptToUse.trim()) {
-        try {
-          promptToUse = await enhancePromptForLTX(promptToUse);
-          console.log(`[OpenRouter LTX] Enhanced prompt: "${req.promptText}" -> "${promptToUse}"`);
-        } catch (err) {
-          console.log("[OpenRouter LTX] Prompt enhancement failed, utilizing raw.");
-        }
+  // HARDCODED FAILSOUND CHECK: Force LTX Video generation
+  try {
+    let promptToUse = req.promptText ?? "";
+    if (config.OPENROUTER_API_KEY && config.OPENROUTER_API_KEY !== "missing-OPENROUTER_API_KEY" && promptToUse.trim()) {
+      try {
+        promptToUse = await enhancePromptForLTX(promptToUse);
+        console.log(`[OpenRouter LTX] Enhanced prompt: "${req.promptText}" -> "${promptToUse}"`);
+      } catch (err) {
+        console.log("[OpenRouter LTX] Prompt enhancement failed, utilizing raw.");
       }
-      const duration = req.duration ?? 4;
-      // Pass both the correct sequence order and any optional initial frame
-      const videoUrl = await generateLTXVideo(promptToUse, duration, req.promptImage);
-      return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
-    } catch (err: any) {
-      throw new Error(`LTX Generation failed: ${err.message || err}`);
     }
+    const duration = req.duration ?? 4;
+    // Pass both the correct sequence order and any optional initial frame
+    const videoUrl = await generateLTXVideo(promptToUse, duration, req.promptImage);
+    return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
+  } catch (err: any) {
+    throw new Error(`LTX Generation failed: ${err.message || err}`);
   }
-
-  const promptText = await enhancePromptIfNeeded(req.promptText ?? "");
-
-  // If self-hosted local inference is configured, call it!
-  if (config.LOCAL_INFERENCE_URL) {
-    try {
-      const videoUrl = await callLocalInference("video", promptText, {
-        image_url: req.promptImage,
-        prompt_image: req.promptImage,
-        ratio: req.ratio ?? "16:9",
-        model: req.model ?? "wan2.1",
-      });
-      if (videoUrl) {
-        return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
-      }
-    } catch (err) {
-      console.log("[Local Inference] Note: Local inference not reachable. Applying standard backup pipeline.");
-    }
-  }
-
-  // Generate dynamic, high-fashion layout via OpenRouter / Procedural pipeline
-  const videoUrl = await generateProceduralAsset(promptText, "video");
-  return { id: encodeTaskId({ source: "openrouter", id: videoUrl }) };
 }
 
 export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTask> {
-  // If LTX is selected, perform dedicated, highly structured prompt enhancement first!
-  if (req.model === "ltx-video") {
-    try {
-      let promptToUse = req.promptText ?? "";
-      if (config.OPENROUTER_API_KEY && config.OPENROUTER_API_KEY !== "missing-OPENROUTER_API_KEY" && promptToUse.trim()) {
-        try {
-          promptToUse = await enhancePromptForLTX(promptToUse);
-          console.log(`[OpenRouter LTX] Enhanced prompt: "${req.promptText}" -> "${promptToUse}"`);
-        } catch (err) {
-          console.log("[OpenRouter LTX] Prompt enhancement failed, utilizing raw.");
-        }
+  // HARDCODED FAILSOUND CHECK: Force LTX Video generation
+  try {
+    let promptToUse = req.promptText ?? "";
+    if (config.OPENROUTER_API_KEY && config.OPENROUTER_API_KEY !== "missing-OPENROUTER_API_KEY" && promptToUse.trim()) {
+      try {
+        promptToUse = await enhancePromptForLTX(promptToUse);
+        console.log(`[OpenRouter LTX] Enhanced prompt: "${req.promptText}" -> "${promptToUse}"`);
+      } catch (err) {
+        console.log("[OpenRouter LTX] Prompt enhancement failed, utilizing raw.");
       }
-      const duration = req.duration ?? 4;
-      const videoUrl = await generateLTXVideo(promptToUse, duration);
-      return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
-    } catch (err: any) {
-      throw new Error(`LTX Generation failed: ${err.message || err}`);
     }
+    const duration = req.duration ?? 4;
+    const videoUrl = await generateLTXVideo(promptToUse, duration);
+    return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
+  } catch (err: any) {
+    throw new Error(`LTX Generation failed: ${err.message || err}`);
   }
-
-  // Otherwise, fall back to the prompt enhancer for other models
-  const promptText = await enhancePromptIfNeeded(req.promptText);
-
-  if (config.LOCAL_INFERENCE_URL) {
-    try {
-      const videoUrl = await callLocalInference("video", promptText, {
-        ratio: req.ratio ?? "16:9",
-        model: req.model ?? "wan2.1",
-      });
-      if (videoUrl) {
-        return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
-      }
-    } catch (err) {
-      console.log("[Local Inference] Note: Local inference not reachable. Applying standard backup pipeline.");
-    }
-  }
-
-  const videoUrl = await generateProceduralAsset(promptText, "video");
-  return { id: encodeTaskId({ source: "openrouter", id: videoUrl }) };
 }
 
 export async function videoToVideo(req: VideoToVideoRequest): Promise<OpenRouterTask> {
