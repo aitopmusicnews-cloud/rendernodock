@@ -13,8 +13,6 @@ import { config } from "./config.js";
 import { resolveLocalPath, mimeType } from "./paths.js";
 import { runFfmpeg } from "./ffmpeg.js";
 import { storage } from "./storage.js";
-// Import the custom LTX function defined in clips.ts
-import { generateLTXVideo } from "./clips.js";
 
 // OpenRouter client helper to query LLM
 export async function callOpenRouter(prompt: string, systemInstruction?: string, maxTokens: number = 3000): Promise<string> {
@@ -639,7 +637,7 @@ async function callLocalInference(
 }
 
 export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouterTask> {
-  // HARDCODED FAILSOUND CHECK: Force LTX Video generation
+  // ROUTE B: Direct HTTP Fetch directly to LTX-Video Modal
   try {
     let promptToUse = req.promptText ?? "";
     if (config.OPENROUTER_API_KEY && config.OPENROUTER_API_KEY !== "missing-OPENROUTER_API_KEY" && promptToUse.trim()) {
@@ -651,16 +649,43 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouter
       }
     }
     const duration = req.duration ?? 4;
-    // Pass both the correct sequence order and any optional initial frame
-    const videoUrl = await generateLTXVideo(promptToUse, duration, req.promptImage);
-    return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
+
+    const modalUrl = config.MODAL_LTX_URL || "[https://cdtfullsail--mvs-ltx-video-generate.modal.run](https://cdtfullsail--mvs-ltx-video-generate.modal.run)";
+    console.log(`[Direct LTX Route] Sending request to Modal at: ${modalUrl}`);
+
+    const response = await fetch(modalUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: promptToUse,
+        duration: duration,
+        init_image_url: req.promptImage
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Modal returned status ${response.status}: ${errText}`);
+    }
+
+    const data = await response.json() as any;
+    if (!data.video_url) {
+      throw new Error(`Modal response did not return a video_url: ${JSON.stringify(data)}`);
+    }
+
+    console.log(`[Direct LTX Route] Success! Video rendered at: ${data.video_url}`);
+    return { id: encodeTaskId({ source: "procedural", id: data.video_url }) };
+
   } catch (err: any) {
-    throw new Error(`LTX Generation failed: ${err.message || err}`);
+    console.error("[Direct LTX Route Error] Image-to-Video direct pipeline failed, falling back:", err?.message || err);
+    // Standard backup trigger if GPU node is unreachable
+    const videoUrl = await generateProceduralAsset(req.promptText ?? "", "video");
+    return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
   }
 }
 
 export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTask> {
-  // HARDCODED FAILSOUND CHECK: Force LTX Video generation
+  // ROUTE B: Direct HTTP Fetch directly to LTX-Video Modal
   try {
     let promptToUse = req.promptText ?? "";
     if (config.OPENROUTER_API_KEY && config.OPENROUTER_API_KEY !== "missing-OPENROUTER_API_KEY" && promptToUse.trim()) {
@@ -672,10 +697,37 @@ export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTa
       }
     }
     const duration = req.duration ?? 4;
-    const videoUrl = await generateLTXVideo(promptToUse, duration);
-    return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
+
+    const modalUrl = config.MODAL_LTX_URL || "[https://cdtfullsail--mvs-ltx-video-generate.modal.run](https://cdtfullsail--mvs-ltx-video-generate.modal.run)";
+    console.log(`[Direct LTX Route] Sending request to Modal at: ${modalUrl}`);
+
+    const response = await fetch(modalUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: promptToUse,
+        duration: duration
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Modal returned status ${response.status}: ${errText}`);
+    }
+
+    const data = await response.json() as any;
+    if (!data.video_url) {
+      throw new Error(`Modal response did not return a video_url: ${JSON.stringify(data)}`);
+    }
+
+    console.log(`[Direct LTX Route] Success! Video rendered at: ${data.video_url}`);
+    return { id: encodeTaskId({ source: "procedural", id: data.video_url }) };
+
   } catch (err: any) {
-    throw new Error(`LTX Generation failed: ${err.message || err}`);
+    console.error("[Direct LTX Route Error] Text-to-Video direct pipeline failed, falling back:", err?.message || err);
+    // Standard backup trigger if GPU node is unreachable
+    const videoUrl = await generateProceduralAsset(req.promptText, "video");
+    return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
   }
 }
 
