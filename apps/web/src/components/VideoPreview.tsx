@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useStore } from "../lib/store.js";
 import type { Clip } from "@mvs/shared";
+import { useJobPolling } from "../hooks/useJobPolling.js";
 
 /**
  * Double-buffered video preview. Two <video> elements alternate so the next
@@ -15,12 +16,57 @@ export function VideoPreview() {
   const bRef = useRef<HTMLVideoElement>(null);
   const [frontSlot, setFrontSlot] = useState<"a" | "b">("a");
   /** Composite key (id + url) loaded in each slot. Tracks both so a rehosted
-   *  URL triggers a reload even though the clip ID stays the same. */
+   * URL triggers a reload even though the clip ID stays the same. */
   const loadedRef = useRef<{ a: string | null; b: string | null }>({ a: null, b: null });
 
   const clips = useStore((s) => s.clips);
   const playhead = useStore((s) => s.playhead);
   const isPlaying = useStore((s) => s.isPlaying);
+  const selectedClipId = useStore((s) => s.selectedClipId);
+  const updateClip = useStore((s) => s.updateClip);
+
+  // Find standard clips to assist status polling overlays
+  const selectedClip = clips.find((c) => c.id === selectedClipId) ?? null;
+  const playheadClip = clips.find((c) => playhead >= c.start && playhead < c.end) ?? null;
+
+  // Prioritize polling on playheadClip if it is currently rendering, otherwise selected clip
+  const targetClip = (playheadClip?.generationTaskId) ? playheadClip : selectedClip;
+  const activeJobId = targetClip?.generationTaskId;
+
+  // Bind the real-time background job polling hook
+  const { status: pollStatus } = useJobPolling({
+    jobId: activeJobId,
+    intervalMs: 3000,
+    onSuccess: (completedUrl) => {
+      if (targetClip) {
+        const patch: any = {
+          videoUrl: completedUrl,
+          status: "ready",
+          generationTaskId: undefined,
+          lastError: undefined,
+        };
+        updateClip(targetClip.id, patch);
+      }
+    },
+    onFailure: (errMsg) => {
+      if (targetClip) {
+        const patch: any = {
+          status: "failed",
+          lastError: errMsg,
+          generationTaskId: undefined,
+        };
+        updateClip(targetClip.id, patch);
+      }
+    },
+  });
+
+  // Sync back to general clip store generation state
+  useEffect(() => {
+    if (targetClip && pollStatus === "pending" && targetClip.status !== "generating") {
+      const patch: any = { status: "generating" };
+      updateClip(targetClip.id, patch);
+    }
+  }, [pollStatus, targetClip, updateClip]);
 
   const readyClips = clips.filter((c): c is Clip & { videoUrl: string } =>
     c.status === "ready" && !!c.videoUrl
@@ -49,9 +95,6 @@ export function VideoPreview() {
   }, [slotEl]);
 
   // Load/swap clips when the active clip changes. Preload next.
-  // Cleanup removes any pending loadedmetadata listeners — without it, a
-  // stale listener fires with old props when active/playhead changes before
-  // metadata loads (e.g. fast clicks during cold-load).
   useEffect(() => {
     if (!active) return;
     const back: "a" | "b" = frontSlot === "a" ? "b" : "a";
@@ -60,9 +103,6 @@ export function VideoPreview() {
     const activeKey = slotKey(active);
     const slotDur = active.end - active.start;
     if (loadedRef.current[frontSlot] === activeKey) {
-      // Already loaded on front — but may be ended from a previous play, and
-      // the rate may have been set when the slot duration was different
-      // (e.g. user dragged a boundary). Re-apply + repaint.
       const front = slotEl(frontSlot);
       if (front) {
         applyPlaybackRate(front, slotDur, active.source);
@@ -70,7 +110,6 @@ export function VideoPreview() {
         repaintIfStale(front, isPlaying);
       }
     } else if (loadedRef.current[back] === activeKey) {
-      // The back slot is preloaded with the new active clip — promote it.
       const oldFront = slotEl(frontSlot);
       const newFront = slotEl(back);
       oldFront?.pause();
@@ -81,9 +120,6 @@ export function VideoPreview() {
       }
       setFrontSlot(back);
     } else {
-      // Cold load into the current front slot. Apply rate once metadata
-      // arrives — pure addEventListener (no `{ once: true }`) so the
-      // cleanup below can remove it if the effect re-runs first.
       loadInto(frontSlot, active);
       const front = slotEl(frontSlot);
       if (front) {
@@ -100,17 +136,9 @@ export function VideoPreview() {
       loadInto(back, next);
     }
     return () => { for (const c of cleanups) c(); };
-    // playhead intentionally omitted — only used for the inline seek above,
-    // which we want bound to the active-change moment, not every tick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, next, frontSlot, slotEl, loadInto, isPlaying]);
 
-  // Sync the front video to the playhead on every change. During natural
-  // playback the playbackRate adjustment keeps the video tracking the slot,
-  // so `seekTo`'s drift threshold (~0.15s) means we no-op on every tick.
-  // When the user clicks the timeline (or the playhead jumps from any other
-  // source), drift exceeds the threshold and we seek. Repaint nudge only
-  // when paused; during play the act of seeking already triggers a frame.
+  // Sync playhead seek alignment
   useEffect(() => {
     if (!active) return;
     const front = slotEl(frontSlot);
@@ -127,7 +155,7 @@ export function VideoPreview() {
     return () => front.removeEventListener("loadedmetadata", doSeek);
   }, [playhead, active, frontSlot, slotEl, isPlaying]);
 
-  // Play/pause the front element.
+  // Play/pause the front element
   useEffect(() => {
     const front = slotEl(frontSlot);
     if (!front || !active) return;
@@ -151,9 +179,6 @@ export function VideoPreview() {
     }
   }, []);
 
-  // Slot visibility — opacity (not visibility/display) so the back element
-  // keeps decoding. When `active` is null we hide BOTH so the (possibly
-  // black fade-out) last frame doesn't show under the empty overlay.
   const slotStyle = (slot: "a" | "b"): React.CSSProperties => ({
     width: "100%",
     height: "100%",
@@ -163,21 +188,41 @@ export function VideoPreview() {
     pointerEvents: active && frontSlot === slot ? "auto" : "none",
   });
 
-  // Important: the video elements stay mounted regardless of `active`. If we
-  // unmounted them on `active === null`, scrubbing back would create new
-  // <video> elements while loadedRef still claimed the old clip was loaded
-  // — the "already on front" branch would no-op against an empty element
-  // and the user would see black until something else triggered a cold load.
   return (
-    <div ref={containerRef} className="preview-container">
+    <div ref={containerRef} className="preview-container" style={{ position: "relative" }}>
       <video ref={aRef} muted playsInline style={slotStyle("a")} />
       <video ref={bRef} muted playsInline style={slotStyle("b")} />
-      {!active && (
+
+      {/* Loading overlay shown when current playhead is processing */}
+      {playheadClip && (playheadClip.status === "generating" || playheadClip.status === "queued") && (
+        <div className="preview-empty preview-empty-overlay" style={{ background: "rgba(9, 10, 15, 0.85)", backdropFilter: "blur(4px)", zIndex: 5 }}>
+          <div className="h-8 w-8 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mb-3" />
+          <div className="label-big" style={{ fontSize: "1.1rem", textTransform: "none", color: "#f4f4f5" }}>
+            {playheadClip.status === "queued" ? "Queued in workspace..." : "Generating Video & Foley..."}
+          </div>
+          <div style={{ marginTop: "4px", color: "#a1a1aa", fontSize: "0.8rem" }}>
+            LTX-2.3-Audio pipeline running on Modal GPU...
+          </div>
+        </div>
+      )}
+
+      {/* Error overlay shown if generation fails */}
+      {playheadClip && playheadClip.status === "failed" && !active && (
+        <div className="preview-empty preview-empty-overlay" style={{ background: "rgba(9, 10, 15, 0.9)", zIndex: 5 }}>
+          <div className="label-big" style={{ color: "#f87171", fontSize: "1.2rem" }}>Generation Failed</div>
+          <div style={{ marginTop: "6px", color: "#d4d4d8", maxWidth: "80%", textAlign: "center", fontSize: "0.85rem" }}>
+            {playheadClip.lastError || "Unknown GPU cluster error."}
+          </div>
+        </div>
+      )}
+
+      {!active && (!playheadClip || (playheadClip.status !== "generating" && playheadClip.status !== "queued" && playheadClip.status !== "failed")) && (
         <div className="preview-empty preview-empty-overlay">
           <div className="label-big">preview</div>
           <div>no clip at playhead</div>
         </div>
       )}
+
       <button
         type="button"
         className="preview-fullscreen"
@@ -204,47 +249,16 @@ function seekTo(el: HTMLVideoElement, clip: { start: number; end: number }, play
   }
 }
 
-/**
- * Make sure the seeked frame actually paints. Setting `currentTime` on a
- * paused video doesn't always force a repaint — particularly when the
- * element was previously in `ended` state, which is exactly the case after
- * a clip plays through and the user scrubs back into it. A brief
- * play()→pause() roundtrip wakes the decoder and the seeked frame lands.
- *
- * If we're meant to be playing, we just call play(). If the element isn't
- * stale (not ended, has frames), we no-op to avoid a flash on every scrub.
- */
 function repaintIfStale(el: HTMLVideoElement, isPlaying: boolean): void {
   if (isPlaying) {
     el.play().catch(() => {});
     return;
   }
-  // readyState < HAVE_CURRENT_DATA (2) means no decoded frame is available
-  // for the current position; ended means we just played past the end. In
-  // either case a play+pause forces a fresh decode at the seeked time.
   if (el.ended || el.readyState < 2) {
     el.play().then(() => el.pause()).catch(() => {});
   }
 }
 
-/**
- * Time-stretch a video element so its intrinsic duration spans the timeline
- * slot. Mirrors the setpts=(PTS-STARTPTS)*K stretch the renderer applies, so
- * preview ↔ exported MP4 stay in sync.
- *
- *   K = vidDur / slotDur
- *
- *   - K < 1 (source longer than slot): video plays slower so it fills the slot.
- *   - K > 1 (source shorter than slot): video plays faster so it fits the slot.
- *
- * Clamped to [0.25, 4] so a degenerate slotDur (e.g. mid-drag transient zero)
- * can't break the element. We're muted so audio artifacts of off-rate
- * playback are irrelevant.
- *
- * lipSync is the exception: the renderer hard-trims those clips (no
- * time-stretch, to keep mouth movement in sync with the audio), so preview
- * must also play them at 1x.
- */
 function applyPlaybackRate(el: HTMLVideoElement, slotDur: number, source?: string): void {
   if (source === "lipSync") {
     if (el.playbackRate !== 1) el.playbackRate = 1;
