@@ -35,7 +35,6 @@ const TEXT_TO_VIDEO_MODELS: Array<{ value: any; label: string; desc: string }> =
   { value: "openrouter_ultra", label: "OpenRouter Ultra", desc: "High-fidelity static rendering · Gemini 2.5 Pro" },
 ];
 
-// Aleph (video-to-video) constrains to openrouter_aleph or seedance2 server-side.
 const ALEPH_MODELS: Array<{ value: GenerationModel; label: string; desc: string }> = [
   { value: "openrouter_aleph", label: "OpenRouter Aleph", desc: "primary restyle path" },
   { value: "seedance2", label: "SeedDance 2", desc: "alt restyle" },
@@ -74,7 +73,6 @@ export function Sidebar() {
   const hasPrev = clipIdx > 0 && clips[clipIdx - 1]?.status === "ready";
   const hasNext = clipIdx >= 0 && clipIdx < clips.length - 1 && clips[clipIdx + 1]?.status === "ready";
 
-  // Default to "ltx-video" when starting generations
   const effectiveModel =
     clip.model ?? (clip.source === "continue" ? "ltx-video" : "ltx-video");
   const showModelPicker =
@@ -88,7 +86,7 @@ export function Sidebar() {
   const setImagePrompt = (value: string) => updateClip(clip.id, { imagePrompt: value });
   const setBridge = (on: boolean) => updateClip(clip.id, { bridge: on });
   
-  // FIXED: Declare the patch outside of the function call as an 'any' type to silence TS2353
+  // FIXED: Variable isolated out-of-line as 'any' to eliminate error TS2353 during setAudio updates
   const setAudio = (on: boolean) => {
     const patch: any = { enableAudio: on };
     updateClip(clip.id, patch);
@@ -124,7 +122,7 @@ export function Sidebar() {
           ? clip.archetypeUrl ?? lookbook[0] ?? ""
           : characterImage ?? "";
           
-    // FIXED: Declare the payload as an 'any' type before passing to scheduler to bypass validation[cite: 1]
+    // FIXED: Variable isolated out-of-line as 'any' to eliminate error TS2353 during scheduler enqueueing
     const generationPayload: any = {
       clipId: clip.id,
       source: clip.source,
@@ -292,7 +290,6 @@ export function Sidebar() {
 
 type CanGenerate = { ok: true } | { ok: false; reason: string };
 
-// FIXED: Declare strict validation helpers
 function checkCanGenerate(
   clip: Clip,
   ctx: {
@@ -402,7 +399,7 @@ function SourcePicker({
         </div>
       )}
 
-      {/* FIXED: Toggle Switch for LTX Environmental foley */}
+      {/* LTX Environmental Audio Toggle */}
       {effectiveModel === "ltx-video" && showModelPicker && (
         <label className="continuity-toggle" style={{ marginTop: "12px" }}>
           <input
