@@ -8,23 +8,50 @@ import type {
 } from "@mvs/shared";
 import { readFile, writeFile, mkdir, unlink } from "node:fs/promises";
 import { extname, basename, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
 import sharp from "sharp";
 import { config } from "./config.js";
 import { resolveLocalPath, mimeType } from "./paths.js";
 import { runFfmpeg } from "./ffmpeg.js";
 import { storage } from "./storage.js";
 
-// In-memory job store to track async status checks.
-export const jobsStore = new Map<string, {
+export interface JobRecord {
   status: 'pending' | 'completed' | 'failed';
   video_url?: string;
   error?: string;
   prompt: string;
   createdAt: number;
-}>();
+}
 
 const MODAL_ENDPOINT_URL = 'https://cdtfullsail--mvs-ltx-video-generate.modal.run';
 const PUBLIC_API_URL = config.PUBLIC_BASE_URL || 'http://localhost:3001';
+
+/**
+ * File-backed Persistent Database Helpers
+ */
+const getJobsDir = () => join(config.STORAGE_DIR, "jobs");
+
+async function ensureJobsDir() {
+  await mkdir(getJobsDir(), { recursive: true }).catch(() => {});
+}
+
+export async function writeJobToDisk(jobId: string, record: JobRecord): Promise<void> {
+  await ensureJobsDir();
+  const filePath = join(getJobsDir(), `${jobId}.json`);
+  await writeFile(filePath, JSON.stringify(record, null, 2), "utf8");
+}
+
+export async function readJobFromDisk(jobId: string): Promise<JobRecord | null> {
+  const filePath = join(getJobsDir(), `${jobId}.json`);
+  if (!existsSync(filePath)) return null;
+  try {
+    const raw = await readFile(filePath, "utf8");
+    return JSON.parse(raw) as JobRecord;
+  } catch (err) {
+    console.error(`[DB Error] Failed to read job ${jobId} from file:`, err);
+    return null;
+  }
+}
 
 // OpenRouter LLM Helper
 export async function callOpenRouter(prompt: string, systemInstruction?: string, maxTokens: number = 3000): Promise<string> {
@@ -197,8 +224,8 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouter
     promptToUse = `${promptToUse} (completely silent, no background sound, quiet, mute)`;
   }
 
-  // Set pending status in internal store
-  jobsStore.set(jobId, { status: 'pending', prompt: promptToUse, createdAt: Date.now() });
+  // PERSISTED: Write pending record to file system storage
+  await writeJobToDisk(jobId, { status: 'pending', prompt: promptToUse, createdAt: Date.now() });
 
   const webhookUrl = `${PUBLIC_API_URL}/api/openrouter/webhook`;
   const modalPayload = {
@@ -218,7 +245,7 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouter
   }).catch(async (err) => {
     console.error(`[API Trigger Error] Falling back to procedural output:`, err.message);
     const videoUrl = await generateProceduralAsset(promptToUse, "video");
-    jobsStore.set(jobId, { status: 'completed', video_url: videoUrl, prompt: promptToUse, createdAt: Date.now() });
+    await writeJobToDisk(jobId, { status: 'completed', video_url: videoUrl, prompt: promptToUse, createdAt: Date.now() });
   });
 
   return { id: encodeTaskId({ source: "procedural", id: jobId }) };
@@ -234,8 +261,8 @@ export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTa
     promptToUse = `${promptToUse} (completely silent, no background sound, quiet, mute)`;
   }
 
-  // Set pending status in internal store
-  jobsStore.set(jobId, { status: 'pending', prompt: promptToUse, createdAt: Date.now() });
+  // PERSISTED: Write pending record to file system storage
+  await writeJobToDisk(jobId, { status: 'pending', prompt: promptToUse, createdAt: Date.now() });
 
   const webhookUrl = `${PUBLIC_API_URL}/api/openrouter/webhook`;
   const modalPayload = {
@@ -254,7 +281,7 @@ export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTa
   }).catch(async (err) => {
     console.error(`[API Trigger Error] Falling back to procedural output:`, err.message);
     const videoUrl = await generateProceduralAsset(promptToUse, "video");
-    jobsStore.set(jobId, { status: 'completed', video_url: videoUrl, prompt: promptToUse, createdAt: Date.now() });
+    await writeJobToDisk(jobId, { status: 'completed', video_url: videoUrl, prompt: promptToUse, createdAt: Date.now() });
   });
 
   return { id: encodeTaskId({ source: "procedural", id: jobId }) };
@@ -335,9 +362,9 @@ export interface TaskResult {
 export async function getTask(encodedId: string): Promise<TaskResult> {
   const { source, id } = decodeTaskId(encodedId);
 
-  // If this is a tracked async procedural/modal job_id, resolve from jobsStore
   if (id.startsWith("job_")) {
-    const activeJob = jobsStore.get(id);
+    // PERSISTED: Read directly from local JSON disk layer rather than volatile RAM
+    const activeJob = await readJobFromDisk(id);
     if (activeJob) {
       if (activeJob.status === 'completed' && activeJob.video_url) {
         return {
@@ -355,7 +382,6 @@ export async function getTask(encodedId: string): Promise<TaskResult> {
           failure: activeJob.error || "Inference failed on serverless GPU node."
         };
       }
-      // Return custom non-success state to keep polling active
       return {
         id: encodedId,
         status: "PROCESSING",
@@ -373,5 +399,9 @@ export async function getTask(encodedId: string): Promise<TaskResult> {
 }
 
 export async function deleteTask(encodedId: string) {
-  // no-op
+  const { id } = decodeTaskId(encodedId);
+  if (id.startsWith("job_")) {
+    const filePath = join(getJobsDir(), `${id}.json`);
+    await unlink(filePath).catch(() => {});
+  }
 }

@@ -28,7 +28,8 @@ import {
   createAvatar,
   getAvatar,
   listAvatars,
-  jobsStore,
+  readJobFromDisk,
+  writeJobToDisk,
 } from "./openrouter.js";
 import { submitRender, getRenderJob } from "./render_queue.js";
 import { FfmpegError } from "./ffmpeg.js";
@@ -186,7 +187,6 @@ app.setNotFoundHandler((req, reply) => {
 app.addHook("preHandler", async (req, reply) => {
   const authToken = (config as any).API_AUTH_TOKEN;
   if (authToken && req.url.startsWith("/api/")) {
-    // Exempt callback webhooks from checking local API authorization tokens
     if (req.url === "/api/openrouter/webhook") {
       return;
     }
@@ -434,21 +434,22 @@ app.post("/api/openrouter/webhook", async (req, reply) => {
 
   app.log.info(`[Webhook Received] Callback for Job: ${job_id} | Status: ${status}`);
 
-  const existingJob = jobsStore.get(job_id);
+  // PERSISTED: Lookup the job metadata on persistent file storage
+  const existingJob = await readJobFromDisk(job_id);
   if (!existingJob) {
     app.log.warn(`[Webhook Warning] Callback received for unregistered Job ID: ${job_id}`);
-    return reply.code(404).send({ error: "Job context not found." });
+    return reply.code(404).send({ error: "Job context not found on disk." });
   }
 
   if (status === "completed" && video_url) {
-    jobsStore.set(job_id, {
+    await writeJobToDisk(job_id, {
       ...existingJob,
       status: "completed",
       video_url: video_url
     });
-    app.log.info(`[Webhook Success] Resolved Job ID ${job_id} successfully.`);
+    app.log.info(`[Webhook Success] Resolved Job ID ${job_id} persistently on disk.`);
   } else {
-    jobsStore.set(job_id, {
+    await writeJobToDisk(job_id, {
       ...existingJob,
       status: "failed",
       error: error || "Inference failed on GPU cluster."
