@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useStore } from "../lib/store.js";
 import type { Clip } from "@mvs/shared";
-import { useJobPolling } from "../hooks/useJobPolling.js";
+import { useJobPolling } from "../hooks/useJobPolling"; // FIXED: Removed .js extension to resolve TS2307
 
 /**
  * Double-buffered video preview. Two <video> elements alternate so the next
@@ -37,7 +37,7 @@ export function VideoPreview() {
   const { status: pollStatus } = useJobPolling({
     jobId: activeJobId,
     intervalMs: 3000,
-    onSuccess: (completedUrl) => {
+    onSuccess: (completedUrl: string) => { // FIXED: Added explicit string typing to resolve TS7006
       if (targetClip) {
         const patch: any = {
           videoUrl: completedUrl,
@@ -48,7 +48,7 @@ export function VideoPreview() {
         updateClip(targetClip.id, patch);
       }
     },
-    onFailure: (errMsg) => {
+    onFailure: (errMsg: string) => { // FIXED: Added explicit string typing to resolve TS7006
       if (targetClip) {
         const patch: any = {
           status: "failed",
