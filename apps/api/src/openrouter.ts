@@ -337,9 +337,9 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
 
     const cleanPrompt = prompt.replace(/[<>&"]/g, "").substring(0, 75).toUpperCase();
     
-    // FIXED: Removed corrupt markdown link structure inside the xmlns property
+    // FIXED: Use a valid SVG namespace URI and close the <svg> tag
     const svg = `
-      <svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)">
+      <svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <linearGradient id="prograd" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" style="stop-color:${bgStart};stop-opacity:1" />
