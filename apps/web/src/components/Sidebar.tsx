@@ -7,36 +7,32 @@ import { getErrorMessage, modelSupportsBridge } from "@mvs/shared";
 import { AssetUploader } from "./AssetUploader.js";
 import { toast } from "../lib/toast.js";
 
+// UPDATED: Creative pathways customized to match your backend Modal suite and LTX configs
 const SOURCES: Array<{ value: Clip["source"]; label: string; desc: string }> = [
-  { value: "continue", label: "Continue from previous clip", desc: "use last frame of prev as init" },
-  { value: "archetype", label: "Seed from lookbook", desc: "use a specific lookbook image as the init frame" },
-  { value: "generated", label: "Generate fresh image", desc: "text-to-image seed, then image-to-video" },
-  { value: "textToVideo", label: "Text-to-video", desc: "prompt → video directly, no seed image" },
-  { value: "library", label: "From clip library", desc: "reuse a previously saved clip — no generation" },
-  { value: "lipSync", label: "Character sings this section", desc: "Lip Sync · vocal stem" },
-  { value: "aleph", label: "Restyle existing clip", desc: "Aleph · video-to-video" },
+  { value: "textToVideo", label: "Text-to-Video (LTX-Video)", desc: "Prompt ──> Video directly using LTX on Modal GPU" },
+  { value: "generated", label: "Text-to-Image ──> Video", desc: "Generate seed frame using SDXL ──> animate with LTX-Video" },
+  { value: "lipSync", label: "Character Lip Sync Studio", desc: "Animate avatar mouth synced to vocal stems on Modal" },
+  { value: "continue", label: "Continue from previous clip", desc: "Seamless generation utilizing the last frame of the previous clip" },
+  { value: "archetype", label: "Seed from lookbook image", desc: "Select an archetype lookbook image to initialize the motion sequence" },
+  { value: "library", label: "Reapply from clip library", desc: "Reuse previously rendered assets" },
+  { value: "aleph", label: "Restyle existing clip", desc: "Apply image style transfer to render" },
 ];
 
-// Models for image-to-video paths (continue / archetype / generated).
+// UPDATED: Models configured for image-to-video paths highlighting LTX-Video on Modal
 const IMAGE_TO_VIDEO_MODELS: Array<{ value: any; label: string; desc: string }> = [
-  { value: "ltx-video", label: "LTX Video", desc: "Modal GPU · high-motion video · 24fps" }, // ADDED LTX-VIDEO
-  { value: "openrouter_ultra", label: "OpenRouter Ultra", desc: "flagship · Gemini 2.5 Pro · 5s" },
-  { value: "openrouter_flash", label: "OpenRouter Flash", desc: "fast · Gemini 2.5 Flash · 5s" },
-  { value: "local_wan21", label: "Wan v2.1 Local", desc: "local GPU · 5s" },
-  { value: "seedance2", label: "SeedDance 2", desc: "high quality · 5–15s" },
-  { value: "veo3.1", label: "Veo 3.1", desc: "Google · 4 / 6 / 8s" },
-  { value: "veo3.1_fast", label: "Veo 3.1 Fast", desc: "Google · faster · 4 / 6 / 8s" },
+  { value: "ltx-video", label: "⚡ LTX Video (Modal)", desc: "High-motion native generation · 768x512 · 24fps" },
+  { value: "openrouter_flash", label: "OpenRouter Flash", desc: "Fast text reference rendering · Gemini 2.5 Flash" },
+  { value: "local_wan21", label: "Wan v2.1 (Local GPU)", desc: "Local workstation deployment pipeline" },
+  { value: "openrouter_ultra", label: "OpenRouter Ultra", desc: "High-fidelity static rendering · Gemini 2.5 Pro" },
+  { value: "seedance2", label: "SeedDance 2", desc: "Fallback alternative video engine" },
 ];
 
-// Subset for text-to-video (no image-only models).
+// UPDATED: Models configured for text-to-video paths highlighting LTX-Video on Modal
 const TEXT_TO_VIDEO_MODELS: Array<{ value: any; label: string; desc: string }> = [
-  { value: "ltx-video", label: "LTX Video", desc: "Modal GPU · high-motion video · 24fps" }, // ADDED LTX-VIDEO
-  { value: "openrouter_ultra", label: "OpenRouter Ultra", desc: "flagship · Gemini 2.5 Pro · 5s" },
-  { value: "openrouter_flash", label: "OpenRouter Flash", desc: "fast · Gemini 2.5 Flash · 5s" },
-  { value: "local_wan21", label: "Wan v2.1 Local", desc: "local GPU · 5s" },
-  { value: "seedance2", label: "SeedDance 2", desc: "high quality · 5–15s" },
-  { value: "veo3.1", label: "Veo 3.1", desc: "Google · 4 / 6 / 8s" },
-  { value: "veo3.1_fast", label: "Veo 3.1 Fast", desc: "faster · 4 / 6 / 8s" },
+  { value: "ltx-video", label: "⚡ LTX Video (Modal)", desc: "High-motion native generation · 768x512 · 24fps" },
+  { value: "openrouter_flash", label: "OpenRouter Flash", desc: "Fast text reference rendering · Gemini 2.5 Flash" },
+  { value: "local_wan21", label: "Wan v2.1 (Local GPU)", desc: "Local workstation deployment pipeline" },
+  { value: "openrouter_ultra", label: "OpenRouter Ultra", desc: "High-fidelity static rendering · Gemini 2.5 Pro" },
 ];
 
 // Aleph (video-to-video) constrains to openrouter_aleph or seedance2 server-side.
@@ -78,7 +74,7 @@ export function Sidebar() {
   const hasPrev = clipIdx > 0 && clips[clipIdx - 1]?.status === "ready";
   const hasNext = clipIdx >= 0 && clipIdx < clips.length - 1 && clips[clipIdx + 1]?.status === "ready";
 
-  // MODIFIED: Fallback defaults to "ltx-video" now
+  // Default to "ltx-video" when starting generations
   const effectiveModel =
     clip.model ?? (clip.source === "continue" ? "ltx-video" : "ltx-video");
   const showModelPicker =
