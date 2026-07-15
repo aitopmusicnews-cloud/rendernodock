@@ -57,17 +57,18 @@ class LTXGenerator:
         num_frames = ((num_frames - 1) // 8) * 8 + 1
         num_frames = max(9, min(num_frames, 97))
 
-        # Standard negative prompt to force realistic, high-fidelity styles
+        # Standard negative prompt to filter out abstract/low-quality artifacts
         negative_prompt = "worst quality, blurry, distorted, low resolution, cartoon, abstract, static, draft"
 
         video_frames = self.pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
-            num_inference_steps=30,  # Optimal denoising steps
-            guidance_scale=4.5,     # Stronger alignment to detailed prompt descriptions
+            num_inference_steps=30,  # Denoising steps
+            guidance_scale=4.5,     # Prompt adherence alignment
             num_frames=num_frames,
-            height=512,             # Native LTX-Video resolution height
-            width=768,              # Native LTX-Video resolution width
+            height=512,             # Native LTX aspect height
+            width=768,              # Native LTX aspect width
+            max_sequence_length=256, # Prevents token truncation of long cinematic descriptions
         ).frames[0]
 
         filename = f"ltx-{uuid.uuid4()}.mp4"
@@ -86,7 +87,8 @@ def generate(payload: dict):
     gen = LTXGenerator()
     filename = gen.generate_clip.remote(prompt, duration)
     
-    return {"video_url": f"https://{modal.Config().username}--mvs-ltx-video-get-file.modal.run?filename={filename}"}
+    # Hardcoded your workspace username 'cdtfullsail' to prevent AttributeErrors
+    return {"video_url": f"https://cdtfullsail--mvs-ltx-video-get-file.modal.run?filename={filename}"}
 
 @app.function(image=image, volumes={OUTPUT_DIR: output_volume})
 @modal.fastapi_endpoint(method="GET")
