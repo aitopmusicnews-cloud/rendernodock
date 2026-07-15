@@ -11,7 +11,7 @@ export interface PollingState {
 
 interface UseJobPollingProps {
   jobId: string | null | undefined;
-  intervalMs?: number; // Defaults to 3000ms (3 seconds)
+  intervalMs?: number; // Defaults to 3000ms
   onSuccess?: (videoUrl: string) => void;
   onFailure?: (error: string) => void;
 }
@@ -27,7 +27,7 @@ export function useJobPolling({
   const [error, setError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState<boolean>(false);
 
-  // Keep references to prevent calling stale callbacks if props change mid-stream
+  // Keep references to prevent calling stale callbacks if props change mid-poll
   const successRef = useRef(onSuccess);
   const failureRef = useRef(onFailure);
 
@@ -55,8 +55,8 @@ export function useJobPolling({
 
     async function checkStatus() {
       try {
-        // Query our Express polling status endpoint
-        const response = await fetch(`/api/openrouter/status/${jobId}`);
+        // CLEANUP: Clean, standard tasks route - no openrouter prefix
+        const response = await fetch(`/api/tasks/${jobId}`);
         
         if (!response.ok) {
           throw new Error(`Server responded with status ${response.status}`);
@@ -64,38 +64,37 @@ export function useJobPolling({
 
         const data = await response.json();
 
-        // Ensure state updates are only committed if the component remains mounted
         if (!isMounted) return;
 
-        if (data.status === "completed" && data.video_url) {
+        // "SUCCEEDED" maps to completed inside the openrouter.ts decoder handler
+        if (data.status === "SUCCEEDED" && data.output && data.output[0]) {
+          const completedUrl = data.output[0];
           setStatus("completed");
-          setVideoUrl(data.video_url);
+          setVideoUrl(completedUrl);
           setIsPolling(false);
-          if (successRef.current) successRef.current(data.video_url);
-        } else if (data.status === "failed") {
-          const errMsg = data.error || "Inference failed on the GPU cluster.";
+          if (successRef.current) successRef.current(completedUrl);
+        } else if (data.status === "FAILED") {
+          const errMsg = data.error || "Inference execution failed on GPU cluster.";
           setStatus("failed");
           setError(errMsg);
           setIsPolling(false);
           if (failureRef.current) failureRef.current(errMsg);
         } else {
-          // Still pending/processing, schedule next poll check
+          // Still processing/pending/generating, wait and poll again
           timerId = setTimeout(checkStatus, intervalMs);
         }
       } catch (err: any) {
         if (!isMounted) return;
         console.error("[Polling Hook Error]:", err);
         
-        // We do not immediately fail on network errors (gives resiliency on spotty connections)
-        // Instead, continue polling unless explicitly cancelled
+        // Retrying on network blips for resiliency
         timerId = setTimeout(checkStatus, intervalMs);
       }
     }
 
-    // Begin polling instantly
+    // Begin the first status check
     checkStatus();
 
-    // Clean up timers and unregister hooks on component unmount or jobId change
     return () => {
       isMounted = false;
       if (timerId) clearTimeout(timerId);

@@ -28,7 +28,7 @@ import {
   createAvatar,
   getAvatar,
   listAvatars,
-  jobsStore, // ADDED: Shared asynchronous job tracking state
+  jobsStore,
 } from "./openrouter.js";
 import { submitRender, getRenderJob } from "./render_queue.js";
 import { FfmpegError } from "./ffmpeg.js";
@@ -186,7 +186,7 @@ app.setNotFoundHandler((req, reply) => {
 app.addHook("preHandler", async (req, reply) => {
   const authToken = (config as any).API_AUTH_TOKEN;
   if (authToken && req.url.startsWith("/api/")) {
-    // Prevent auth headers from blocking webhook callbacks from external Modal calls
+    // Exempt callback webhooks from checking local API authorization tokens
     if (req.url === "/api/openrouter/webhook") {
       return;
     }
@@ -420,7 +420,7 @@ app.post("/api/generate/text-to-video", { config: { rateLimit: { max: 10, timeWi
   return reply.send(await textToVideo(TextToVideoRequest.parse(req.body)));
 });
 
-// ADDED: Fastify asynchronous webhook endpoint used by serverless GPU callbacks
+// Fastify Webhook Handler Endpoint used by serverless GPU callbacks
 const WebhookBody = z.object({
   status: z.enum(["completed", "failed"]),
   job_id: z.string(),
