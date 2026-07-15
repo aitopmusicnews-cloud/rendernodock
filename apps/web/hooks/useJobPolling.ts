@@ -50,7 +50,7 @@ export function useJobPolling({
     setError(null);
     setIsPolling(true);
 
-    let timerId: NodeJS.Timeout | null = null;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
     let isMounted = true;
 
     async function checkStatus() {
