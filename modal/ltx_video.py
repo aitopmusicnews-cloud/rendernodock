@@ -1,5 +1,6 @@
 import io
 import os
+import uuid
 from pathlib import Path
 import modal
 
@@ -12,21 +13,22 @@ output_volume = modal.Volume.from_name("mvs-ltx-outputs", create_if_missing=True
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .apt_install("python3-opencv", "ffmpeg")
+    .apt_install("python3-opencv", "ffmpeg", "git")
     .uv_pip_install(
-        "accelerate==1.4.0",
-        "diffusers==0.32.2",
-        "fastapi[standard]==0.115.8",
-        "huggingface-hub==0.36.0",
-        "imageio==2.37.0",
-        "imageio-ffmpeg==0.6.0",
-        "opencv-python==4.11.0.86",
-        "pillow==11.1.0",
-        "torch==2.6.0",
-        "transformers==4.49.0",
-        "sentencepiece==0.2.0",
-        "protobuf==5.29.3",
-        "httpx==0.27.2",
+        "git+https://github.com/huggingface/diffusers.git",
+        "av",
+        "accelerate>=1.4.0",
+        "fastapi[standard]>=0.115.8",
+        "huggingface-hub>=0.36.0",
+        "imageio>=2.37.0",
+        "imageio-ffmpeg>=0.6.0",
+        "opencv-python>=4.11.0.86",
+        "pillow>=11.1.0",
+        "torch>=2.6.0",
+        "transformers>=4.49.0",
+        "sentencepiece>=0.2.0",
+        "protobuf>=5.29.3",
+        "httpx>=0.27.2",
     )
     .env({"HF_HUB_CACHE": MODEL_DIR})
 )
@@ -35,83 +37,117 @@ with image.imports():
     import torch
     import httpx
     from PIL import Image
-    from diffusers import LTXPipeline
-    from diffusers.utils import export_to_video
+    from diffusers import LTX2Pipeline
+    from diffusers.utils import encode_video
+    from diffusers.pipelines.ltx2.utils import DEFAULT_NEGATIVE_PROMPT
 
 @app.cls(
     image=image,
-    gpu="A100-80GB", 
+    gpu="A100-80GB",
     timeout=600,
     volumes={MODEL_DIR: model_volume, OUTPUT_DIR: output_volume},
 )
 class LTXGenerator:
     @modal.enter()
     def load_model(self):
-        self.pipe = LTXPipeline.from_pretrained(
-            "Lightricks/LTX-Video",
+        print("[LTX-2] Loading joint audio-video foundation weights...")
+        self.pipe = LTX2Pipeline.from_pretrained(
+            "diffusers/LTX-2.3-Diffusers",
             torch_dtype=torch.bfloat16,
         ).to("cuda")
 
     @modal.method()
     def generate_clip(self, prompt: str, duration_sec: float, init_image_url: str = None) -> str:
-        import uuid
-        fps = 24
+        fps = 24.0
         num_frames = int(duration_sec * fps)
         num_frames = ((num_frames - 1) // 8) * 8 + 1
-        num_frames = max(9, min(num_frames, 97))
-
-        # Standard negative prompts to keep structural integrity high
-        negative_prompt = "worst quality, blurry, distorted, low resolution, cartoon, abstract, static, draft"
+        num_frames = max(9, min(num_frames, 121))
 
         pipeline_kwargs = {
             "prompt": prompt,
-            "negative_prompt": negative_prompt,
-            "num_inference_steps": 30,
-            "guidance_scale": 4.5,       # Strong alignment to prompt details
+            "negative_prompt": DEFAULT_NEGATIVE_PROMPT,
+            "width": 768,
+            "height": 512,
             "num_frames": num_frames,
-            "height": 512,               # Native height
-            "width": 768,                # Native width
-            "max_sequence_length": 256,  # Allows longer, rich prompt descriptions
+            "frame_rate": fps,
+            "num_inference_steps": 30,
+            "guidance_scale": 3.0,
+            "output_type": "np",
+            "return_dict": False,
         }
 
-        # Handle Image-to-Video if an initial seed image URL is supplied
         if init_image_url:
-            print(f"[LTX-Video] Fetching initial reference frame: {init_image_url}")
+            print(f"[LTX-2] Processing initial reference frame condition: {init_image_url}")
             try:
                 with httpx.Client(timeout=30.0, follow_redirects=True) as client:
                     response = client.get(init_image_url)
                     response.raise_for_status()
-                    # Open and resize PIL image to match the native generation aspect ratio
                     init_image = Image.open(io.BytesIO(response.content)).convert("RGB")
                     init_image = init_image.resize((768, 512), Image.Resampling.LANCZOS)
-                    
-                    # Inject configuration parameters for structural image-to-video conditioning
                     pipeline_kwargs["image"] = init_image
-                    print("[LTX-Video] Successfully loaded image context for conditioning.")
             except Exception as e:
-                print(f"[LTX-Video Warning] Failed to fetch init image, falling back to T2V: {str(e)}")
+                print(f"[LTX-2 Warning] Failed to process image conditioning: {str(e)}")
 
-        # Run compilation
-        video_frames = self.pipe(**pipeline_kwargs).frames[0]
+        print(f"[LTX-2] Spawning joint audio-video generation pass for: '{prompt}'")
+        video_tensors, audio_tensors = self.pipe(**pipeline_kwargs)
 
-        filename = f"ltx-{uuid.uuid4()}.mp4"
+        filename = f"ltx2-{uuid.uuid4()}.mp4"
         filepath = Path(OUTPUT_DIR) / filename
-        export_to_video(video_frames, str(filepath), fps=fps)
+
+        encode_video(
+            video_tensors[0],
+            fps=fps,
+            audio=audio_tensors[0].float().cpu(),
+            audio_sample_rate=self.pipe.vocoder.config.output_sampling_rate,
+            output_path=str(filepath),
+        )
         
+        print(f"[LTX-2] Rendered output saved to: {filename}")
         output_volume.commit()
         return filename
 
+# The API Endpoint updated for Webhooks
 @app.function(image=image, volumes={OUTPUT_DIR: output_volume})
 @modal.fastapi_endpoint(method="POST")
 def generate(payload: dict):
     prompt = payload.get("prompt", "")
     duration = float(payload.get("duration", 4.0))
     init_image_url = payload.get("init_image_url", None)
+    webhook_url = payload.get("webhook_url", None)
+    job_id = payload.get("job_id", None)
     
     gen = LTXGenerator()
-    filename = gen.generate_clip.remote(prompt, duration, init_image_url)
     
-    return {"video_url": f"https://cdtfullsail--mvs-ltx-video-get-file.modal.run?filename={filename}"}
+    try:
+        # Run the computation
+        filename = gen.generate_clip.remote(prompt, duration, init_image_url)
+        video_url = f"https://cdtfullsail--mvs-ltx-video-get-file.modal.run?filename={filename}"
+        
+        # Trigger the webhook callback back to Node.js if provided
+        if webhook_url:
+            print(f"[Webhook] Dispatching success callback to: {webhook_url}")
+            import httpx
+            httpx.post(webhook_url, json={
+                "status": "completed",
+                "job_id": job_id,
+                "video_url": video_url
+            }, timeout=10.0)
+            
+        return {"status": "processing_triggered", "video_url": video_url}
+        
+    except Exception as e:
+        print(f"[Modal Error] Generation failed: {str(e)}")
+        if webhook_url:
+            import httpx
+            try:
+                httpx.post(webhook_url, json={
+                    "status": "failed",
+                    "job_id": job_id,
+                    "error": str(e)
+                }, timeout=10.0)
+            except Exception as cb_err:
+                print(f"[Webhook Error] Failed to dispatch failure callback: {str(cb_err)}")
+        raise e
 
 @app.function(image=image, volumes={OUTPUT_DIR: output_volume})
 @modal.fastapi_endpoint(method="GET")
