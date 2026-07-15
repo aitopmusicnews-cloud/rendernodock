@@ -13,8 +13,6 @@ import { config } from "./config.js";
 import { resolveLocalPath, mimeType } from "./paths.js";
 import { runFfmpeg } from "./ffmpeg.js";
 import { storage } from "./storage.js";
-// Import the custom LTX function defined in clips.ts
-import { generateLTXVideo } from "./clips.js";
 
 // OpenRouter client helper to query LLM
 export async function callOpenRouter(prompt: string, systemInstruction?: string, maxTokens: number = 3000): Promise<string> {
@@ -69,6 +67,25 @@ export async function callOpenRouter(prompt: string, systemInstruction?: string,
   return content.trim();
 }
 
+// Dedicated prompt engineer specifically optimized for LTX-Video's physical attention model
+export async function enhancePromptForLTX(promptText: string): Promise<string> {
+  const systemPrompt = `You are an elite cinematic prompt engineer specialized in structuring inputs for LTX-Video (a highly physical text-to-video diffusion model).
+Your job is to rewrite the user's basic description into a highly detailed, single-paragraph prompt optimized for physics and visual coherence.
+
+Follow this strict structural sequence:
+1. MAIN SOLID SUBJECT & DIRECT ACTION: Start with the primary solid object and what it is physically doing (e.g., "A luxury sports car engine idling", "A desolate Oakland street intersection at night").
+2. CAMERA COMPOSITION & MOTION: Describe the camera's lens, framing, and movement (e.g., "ultra-slow low-to-the-ground forward camera drift, minor handheld organic jitter, shot on 16mm anamorphic lens").
+3. SETTING & LIGHTING: Describe the environment and specific light sources (e.g., "dark street intersection, wet asphalt, amber streetlights, flickering sodium vapor lamp").
+4. ATMOSPHERIC DETAILS (ALWAYS PLACE LAST): Describe fluids, smoke, weather, or particles at the absolute end of the prompt (e.g., "thick white fog slowly rolling in from the background, rain-slicked asphalt reflections"). If placed early, the model will fail and render only fog or smoke.
+
+CRITICAL RULES:
+- Output only the final single paragraph under 250 characters.
+- Do NOT use abstract, metaphorical, or poetic language. Describe only visible physical elements.
+- No introductions, markdown blocks, notes, or quotation marks.`;
+
+  return callOpenRouter(promptText, systemPrompt, 500);
+}
+
 export async function enhancePromptText(promptText: string): Promise<string> {
   const systemPrompt = `You are a cinematic prompt engineer for a music video production suite. 
 Your goal is to enhance the user's description into a highly detailed visual prompt for video/image generation models.
@@ -95,6 +112,30 @@ export async function enhancePromptIfNeeded(promptText: string): Promise<string>
     console.log("[OpenRouter] Prompt enhancement skipped, using original.");
     return promptText;
   }
+}
+
+/**
+ * Sanitize an SVG string so native parsers (librsvg/libxml2 used by sharp)
+ * don't choke on a corrupted namespace. The OpenRouter model sometimes wraps
+ * the xmlns value in a markdown link, e.g.
+ * xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)"
+ * which is not a valid URI and triggers XML_ERR_INVALID_URI (glib parse error).
+ * We also guarantee a well-formed, closed <svg> opening tag.
+ */
+function fixSvgXmlns(svg: string): string {
+  let out = svg;
+  // Strip markdown-link wrappers from any xmlns / xlink declaration value.
+  out = out.replace(
+    /(xmlns(:[a-zA-Z0-9_-]+)?\s*=\s*")\[([^\]]+)\]\(([^)]+)\)(")/g,
+    (_m, open, _ns, _label, uri, close) => `${open}${uri}${close}`
+  );
+  // Ensure a valid SVG namespace is present.
+  if (!/xmlns\s*=/.test(out)) {
+    out = out.replace(/<svg\b/, '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  // Ensure the <svg ...> opening tag is actually closed with '>'.
+  out = out.replace(/<svg([^>]*?)\n\s*</, (_m, attrs) => `<svg${attrs.trimEnd()}><`);
+  return out;
 }
 
 export async function generateSvgWithOpenRouter(prompt: string): Promise<string | null> {
@@ -195,7 +236,7 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
 
   if (customSvg) {
     try {
-      pngBuffer = await sharp(Buffer.from(customSvg)).png().toBuffer();
+      pngBuffer = await sharp(Buffer.from(fixSvgXmlns(customSvg))).png().toBuffer();
       console.log("[OpenRouter SVG] Successfully rendered dynamic SVG from prompt.");
     } catch (err) {
       console.log("[OpenRouter SVG] Sharp render fallback activated.");
@@ -339,7 +380,7 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
     
     // FIXED: Use a valid SVG namespace URI and close the <svg> tag
     const svg = `
-      <svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg">
+      <svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)">
         <defs>
           <linearGradient id="prograd" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" style="stop-color:${bgStart};stop-opacity:1" />
@@ -370,9 +411,17 @@ export async function generateProceduralAsset(prompt: string, type: "image" | "v
     `;
 
     // Render SVG to Buffer
-    pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+    try {
+      pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+    } catch (err) {
+      console.error("[Procedural SVG] Sharp render failed:", (err as Error)?.message || err);
+    }
   }
-  
+
+  if (!pngBuffer) {
+    return Promise.reject(new Error("Failed to render procedural asset: SVG rasterization produced no image."));
+  }
+
   // Save to storage
   const filename = `procedural_${Date.now()}.png`;
   const { publicUrl, id } = await storage.saveUpload(pngBuffer, filename, "image/png");
@@ -588,76 +637,98 @@ async function callLocalInference(
 }
 
 export async function imageToVideo(req: ImageToVideoRequest): Promise<OpenRouterTask> {
-  // If LTX is selected, use the raw prompt directly and bypass prompt enhancement!
-  if (req.model === "ltx-video") {
-    try {
-      const rawPrompt = req.promptText ?? "";
-      const duration = req.duration ?? 4;
-      const videoUrl = await generateLTXVideo(rawPrompt, duration);
-      return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
-    } catch (err: any) {
-      // MODIFIED: Throw the real Modal error back to the frontend instead of failing silently!
-      throw new Error(`LTX Generation failed: ${err.message || err}`);
-    }
-  }
-
-  const promptText = await enhancePromptIfNeeded(req.promptText ?? "");
-
-  // If self-hosted local inference is configured, call it!
-  if (config.LOCAL_INFERENCE_URL) {
-    try {
-      const videoUrl = await callLocalInference("video", promptText, {
-        image_url: req.promptImage,
-        prompt_image: req.promptImage,
-        ratio: req.ratio ?? "16:9",
-        model: req.model ?? "wan2.1",
-      });
-      if (videoUrl) {
-        return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
+  // ROUTE B: Direct HTTP Fetch directly to LTX-Video Modal
+  try {
+    let promptToUse = req.promptText ?? "";
+    if (config.OPENROUTER_API_KEY && config.OPENROUTER_API_KEY !== "missing-OPENROUTER_API_KEY" && promptToUse.trim()) {
+      try {
+        promptToUse = await enhancePromptForLTX(promptToUse);
+        console.log(`[OpenRouter LTX] Enhanced prompt: "${req.promptText}" -> "${promptToUse}"`);
+      } catch (err) {
+        console.log("[OpenRouter LTX] Prompt enhancement failed, utilizing raw.");
       }
-    } catch (err) {
-      console.log("[Local Inference] Note: Local inference not reachable. Applying standard backup pipeline.");
     }
-  }
+    const duration = req.duration ?? 4;
 
-  // Generate dynamic, high-fashion layout via OpenRouter / Procedural pipeline
-  const videoUrl = await generateProceduralAsset(promptText, "video");
-  return { id: encodeTaskId({ source: "openrouter", id: videoUrl }) };
+    const modalUrl = config.MODAL_LTX_URL || "[https://cdtfullsail--mvs-ltx-video-generate.modal.run](https://cdtfullsail--mvs-ltx-video-generate.modal.run)";
+    console.log(`[Direct LTX Route] Sending request to Modal at: ${modalUrl}`);
+
+    const response = await fetch(modalUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: promptToUse,
+        duration: duration,
+        init_image_url: req.promptImage
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Modal returned status ${response.status}: ${errText}`);
+    }
+
+    const data = await response.json() as any;
+    if (!data.video_url) {
+      throw new Error(`Modal response did not return a video_url: ${JSON.stringify(data)}`);
+    }
+
+    console.log(`[Direct LTX Route] Success! Video rendered at: ${data.video_url}`);
+    return { id: encodeTaskId({ source: "procedural", id: data.video_url }) };
+
+  } catch (err: any) {
+    console.error("[Direct LTX Route Error] Image-to-Video direct pipeline failed, falling back:", err?.message || err);
+    // Standard backup trigger if GPU node is unreachable
+    const videoUrl = await generateProceduralAsset(req.promptText ?? "", "video");
+    return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
+  }
 }
 
 export async function textToVideo(req: TextToVideoRequest): Promise<OpenRouterTask> {
-  // If LTX is selected, use the raw prompt and completely bypass the enhancer!
-  if (req.model === "ltx-video") {
-    try {
-      const rawPrompt = req.promptText; 
-      const duration = req.duration ?? 4;
-      const videoUrl = await generateLTXVideo(rawPrompt, duration);
-      return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
-    } catch (err: any) {
-      // MODIFIED: Throw the real Modal error back to the frontend instead of failing silently!
-      throw new Error(`LTX Generation failed: ${err.message || err}`);
-    }
-  }
-
-  // Otherwise, fall back to the prompt enhancer for other models
-  const promptText = await enhancePromptIfNeeded(req.promptText);
-
-  if (config.LOCAL_INFERENCE_URL) {
-    try {
-      const videoUrl = await callLocalInference("video", promptText, {
-        ratio: req.ratio ?? "16:9",
-        model: req.model ?? "wan2.1",
-      });
-      if (videoUrl) {
-        return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
+  // ROUTE B: Direct HTTP Fetch directly to LTX-Video Modal
+  try {
+    let promptToUse = req.promptText ?? "";
+    if (config.OPENROUTER_API_KEY && config.OPENROUTER_API_KEY !== "missing-OPENROUTER_API_KEY" && promptToUse.trim()) {
+      try {
+        promptToUse = await enhancePromptForLTX(promptToUse);
+        console.log(`[OpenRouter LTX] Enhanced prompt: "${req.promptText}" -> "${promptToUse}"`);
+      } catch (err) {
+        console.log("[OpenRouter LTX] Prompt enhancement failed, utilizing raw.");
       }
-    } catch (err) {
-      console.log("[Local Inference] Note: Local inference not reachable. Applying standard backup pipeline.");
     }
-  }
+    const duration = req.duration ?? 4;
 
-  const videoUrl = await generateProceduralAsset(promptText, "video");
-  return { id: encodeTaskId({ source: "openrouter", id: videoUrl }) };
+    const modalUrl = config.MODAL_LTX_URL || "[https://cdtfullsail--mvs-ltx-video-generate.modal.run](https://cdtfullsail--mvs-ltx-video-generate.modal.run)";
+    console.log(`[Direct LTX Route] Sending request to Modal at: ${modalUrl}`);
+
+    const response = await fetch(modalUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: promptToUse,
+        duration: duration
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Modal returned status ${response.status}: ${errText}`);
+    }
+
+    const data = await response.json() as any;
+    if (!data.video_url) {
+      throw new Error(`Modal response did not return a video_url: ${JSON.stringify(data)}`);
+    }
+
+    console.log(`[Direct LTX Route] Success! Video rendered at: ${data.video_url}`);
+    return { id: encodeTaskId({ source: "procedural", id: data.video_url }) };
+
+  } catch (err: any) {
+    console.error("[Direct LTX Route Error] Text-to-Video direct pipeline failed, falling back:", err?.message || err);
+    // Standard backup trigger if GPU node is unreachable
+    const videoUrl = await generateProceduralAsset(req.promptText, "video");
+    return { id: encodeTaskId({ source: "procedural", id: videoUrl }) };
+  }
 }
 
 export async function videoToVideo(req: VideoToVideoRequest): Promise<OpenRouterTask> {
