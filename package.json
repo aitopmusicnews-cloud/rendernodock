@@ -8,12 +8,12 @@
     "packages/shared"
   ],
   "scripts": {
-    "dev": "concurrently -k -p \"[{name}]\" -n \"api,web\" -c \"yellow,cyan\" \"PORT=3001 npm run dev:api\" \"PORT=3000 npm run dev:web\"",
-    "dev:api": "npm run dev --workspace=@mvs/api",
-    "dev:web": "npm run dev --workspace=@mvs/web",
-    "build": "npm run build --workspace=@mvs/web && npm run build --workspace=@mvs/api",
-    "start": "npm run start --workspace=@mvs/api",
-    "lint": "npm run typecheck --workspaces"
+    "dev": "concurrently -k -p \"[{name}]\" -n \"api,web\" -c \"yellow,cyan\" \"PORT=3001 pnpm --filter @mvs/api dev\" \"PORT=3000 pnpm --filter @mvs/web dev\"",
+    "dev:api": "pnpm --filter @mvs/api dev",
+    "dev:web": "pnpm --filter @mvs/web dev",
+    "build": "pnpm --filter @mvs/shared build && pnpm --filter @mvs/web build && pnpm --filter @mvs/api build",
+    "start": "pnpm --filter @mvs/api start",
+    "lint": "pnpm -r typecheck"
   },
   "devDependencies": {
     "concurrently": "^10.0.3"
