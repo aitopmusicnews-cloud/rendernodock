@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useStore } from "../lib/store.js";
 import type { Clip } from "@mvs/shared";
-import { useJobPolling } from "../hooks/useJobPolling"; // FIXED: Removed .js extension to resolve TS2307
+import { useJobPolling } from "../../hooks/useJobPolling";
+
+type StoreState = ReturnType<typeof useStore.getState>;
 
 /**
  * Double-buffered video preview. Two <video> elements alternate so the next
@@ -19,11 +21,11 @@ export function VideoPreview() {
    * URL triggers a reload even though the clip ID stays the same. */
   const loadedRef = useRef<{ a: string | null; b: string | null }>({ a: null, b: null });
 
-  const clips = useStore((s) => s.clips);
-  const playhead = useStore((s) => s.playhead);
-  const isPlaying = useStore((s) => s.isPlaying);
-  const selectedClipId = useStore((s) => s.selectedClipId);
-  const updateClip = useStore((s) => s.updateClip);
+  const clips = useStore((s: StoreState) => s.clips);
+  const playhead = useStore((s: StoreState) => s.playhead);
+  const isPlaying = useStore((s: StoreState) => s.isPlaying);
+  const selectedClipId = useStore((s: StoreState) => s.selectedClipId);
+  const updateClip = useStore((s: StoreState) => s.updateClip);
 
   // Find standard clips to assist status polling overlays
   const selectedClip = clips.find((c) => c.id === selectedClipId) ?? null;
