@@ -28,6 +28,7 @@ import {
   createAvatar,
   getAvatar,
   listAvatars,
+  jobsStore, // ADDED: Shared asynchronous job tracking state
 } from "./openrouter.js";
 import { submitRender, getRenderJob } from "./render_queue.js";
 import { FfmpegError } from "./ffmpeg.js";
@@ -35,7 +36,6 @@ import { extractLastFrame } from "./frames.js";
 import { sliceAudio } from "./audio_slice.js";
 import { ensureVocalStem } from "./vocal.js";
 import { saveProject, listProjects, loadProject, deleteProject, listRenders } from "./projects.js";
-// MODIFIED: Included generateLTXVideo in the imports from clips.js
 import { saveClip, listClips, deleteClip, generateLTXVideo } from "./clips.js";
 import { saveImage, listImages, deleteImage } from "./images.js";
 import { saveFolder, listFolders, deleteFolder } from "./folders.js";
@@ -62,9 +62,6 @@ const app = Fastify({
   maxParamLength: 500,
 });
 
-// WEB_ORIGIN may be a single URL or a comma-separated list. The list form is
-// useful when the same task definition is fronted by both an ALB and a
-// CloudFront distribution and the SPA can be loaded from either.
 const webOrigins = config.WEB_ORIGIN.split(",").map((s) => s.trim()).filter(Boolean);
 await app.register(cors, {
   origin: (origin, cb) => {
@@ -94,38 +91,31 @@ await app.register(fastifyStatic, {
   decorateReply: false,
 });
 
-// Resolve the SPA assets directory (apps/web/dist).
-// In production, the same container serves the built SPA at `/`.
-// We attempt to resolve the directory using several standard fallback paths
-// to handle different current working directories (e.g. monorepo root vs apps/api workspace directory).
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 let webDistResolved: string | null = null;
 const possibleDirs = [
   config.WEB_DIST_DIR,
-  resolve(join(__dirname, "..", "..", "web", "dist")), // if inside apps/api/dist or apps/api/src
-  resolve(join(__dirname, "..", "web")),               // if inside /app/dist (Docker runtime)
-  resolve(join(__dirname, "..", "web", "dist")),        // other potential nesting
+  resolve(join(__dirname, "..", "..", "web", "dist")),
+  resolve(join(__dirname, "..", "web")),
+  resolve(join(__dirname, "..", "web", "dist")),
   "apps/web/dist",
   "../web/dist",
   "../../apps/web/dist"
 ].filter(Boolean) as string[];
 
 for (const dir of possibleDirs) {
-  // Try resolving as-is (e.g. absolute, or relative to process.cwd())
   const p1 = resolve(dir);
   if (existsSync(p1) && statSync(p1).isDirectory()) {
     webDistResolved = p1;
     break;
   }
-  // Try resolving relative to monorepo root if we are nested in apps/api
   const p2 = resolve(join(process.cwd(), "..", "..", dir));
   if (existsSync(p2) && statSync(p2).isDirectory()) {
     webDistResolved = p2;
     break;
   }
-  // Try resolving relative to parent directory
   const p3 = resolve(join(process.cwd(), "..", dir));
   if (existsSync(p3) && statSync(p3).isDirectory()) {
     webDistResolved = p3;
@@ -149,13 +139,8 @@ if (serveSpa) {
   );
 }
 
-// Custom SPA router catch-all for GET requests.
-// Handles serving actual files (like .js, .css, images etc.) if they exist,
-// and falls back to serving index.html for any frontend client-side routes.
 app.get("/*", async (req, reply) => {
   const urlLower = req.url.toLowerCase();
-  
-  // Exclude API or storage requests from matching the SPA router
   const isApiOrStorage =
     urlLower.startsWith("/api/") ||
     urlLower.startsWith("/storage/") ||
@@ -168,23 +153,17 @@ app.get("/*", async (req, reply) => {
 
   const distDir = webDistResolved;
   if (serveSpa && distDir) {
-    // Strip query parameters to get the clean file path (type-safe for noUncheckedIndexedAccess)
     const urlPath = req.url.split("?")[0] ?? "/";
-    
-    // Check if the requested file exists in the resolved web dist directory
     const targetFile = join(distDir, urlPath);
     if (existsSync(targetFile) && statSync(targetFile).isFile()) {
       return reply.sendFile(urlPath);
     }
-    
-    // If it does not exist on disk, fall back to index.html to support SPA routing
     return reply.sendFile("index.html");
   }
 
   return reply.code(404).send({ error: "not found" });
 });
 
-// Non-GET not-found fallback. Handles other methods (POST, PUT, DELETE, etc.) gracefully.
 app.setNotFoundHandler((req, reply) => {
   const urlLower = req.url.toLowerCase();
   const isApiOrStorage =
@@ -197,7 +176,6 @@ app.setNotFoundHandler((req, reply) => {
     return reply.code(404).send({ error: `Route ${req.method} ${req.url} not found` });
   }
 
-  // If it's a GET request that somehow triggered the not-found handler (e.g. if the wildcard route didn't catch it)
   if (req.method === "GET" && serveSpa) {
     return reply.sendFile("index.html");
   }
@@ -208,6 +186,10 @@ app.setNotFoundHandler((req, reply) => {
 app.addHook("preHandler", async (req, reply) => {
   const authToken = (config as any).API_AUTH_TOKEN;
   if (authToken && req.url.startsWith("/api/")) {
+    // Prevent auth headers from blocking webhook callbacks from external Modal calls
+    if (req.url === "/api/openrouter/webhook") {
+      return;
+    }
     const authHeader = req.headers.authorization;
     let token = "";
     if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -242,8 +224,6 @@ app.setErrorHandler((err: any, req, reply) => {
     return reply.code(400).send({ error: err.errors.map((e) => e.message).join("; ") });
   }
   if (err instanceof FfmpegError) {
-    // ffmpeg stderr can contain absolute file paths and other internals; log
-    // it server-side and only return the generic message to clients.
     req.log.error({ err, stderr: err.stderr }, "ffmpeg failure");
     return reply.code(500).send({ error: err.message });
   }
@@ -254,9 +234,6 @@ app.setErrorHandler((err: any, req, reply) => {
 
 app.get("/health", async () => ({ ok: true }));
 
-// Magic-byte sniffing — MIME headers are caller-controlled and can lie.
-// Returns true if the buffer's first bytes match a known signature for the
-// declared family (audio | image | video).
 function sniffMatches(buf: Buffer, family: "audio" | "image" | "video"): boolean {
   if (buf.length < 4) return false;
   const u = (i: number) => buf.readUInt8(i);
@@ -266,24 +243,21 @@ function sniffMatches(buf: Buffer, family: "audio" | "image" | "video"): boolean
   };
 
   if (family === "audio") {
-    if (ascii(0, 3) === "ID3") return true; // mp3 with id3
-    if (u(0) === 0xff && (u(1) & 0xe0) === 0xe0) return true; // mpeg/aac sync
-    if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "WAVE") return true; // wav
-    if (ascii(0, 4) === "fLaC") return true; // flac
-    if (ascii(0, 4) === "OggS") return true; // ogg/opus
-    if (ascii(4, 4) === "ftyp") return true; // m4a/aac-in-mp4
-    // Generous fallback for other potential audio formats
+    if (ascii(0, 3) === "ID3") return true;
+    if (u(0) === 0xff && (u(1) & 0xe0) === 0xe0) return true;
+    if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "WAVE") return true;
+    if (ascii(0, 4) === "fLaC") return true;
+    if (ascii(0, 4) === "OggS") return true;
+    if (ascii(4, 4) === "ftyp") return true;
     return true;
   }
 
   if (family === "video") {
-    if (buf.length >= 8 && ascii(4, 4) === "ftyp") return true; // mp4/mov/m4v
-    if (buf.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 4) === "AVI ") return true; // avi
-    // webm/mkv — EBML header starts with 1A 45 DF A3
+    if (buf.length >= 8 && ascii(4, 4) === "ftyp") return true;
+    if (buf.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 4) === "AVI ") return true;
     if (buf.length >= 4 && u(0) === 0x1a && u(1) === 0x45 && u(2) === 0xdf && u(3) === 0xa3) return true;
-    if (buf.length >= 4 && ascii(0, 4) === "OggS") return true; // ogv
+    if (buf.length >= 4 && ascii(0, 4) === "OggS") return true;
     
-    // Quick scan of the first 128 bytes for mp4/mov container signatures
     const headAscii = buf.subarray(0, Math.min(buf.length, 128)).toString("ascii");
     if (
       headAscii.includes("ftyp") ||
@@ -295,24 +269,21 @@ function sniffMatches(buf: Buffer, family: "audio" | "image" | "video"): boolean
     ) {
       return true;
     }
-    // Safe fallback: let ffmpeg process the video rather than rejecting it
     console.log("Video magic-bytes did not match exactly, allowing fallback for ffmpeg processing");
     return true;
   }
 
-  // image
-  if (u(0) === 0xff && u(1) === 0xd8 && u(2) === 0xff) return true; // jpeg
-  if (u(0) === 0x89 && ascii(1, 3) === "PNG") return true; // png
-  if (ascii(0, 4) === "GIF8") return true; // gif
-  if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP") return true; // webp
-  return true; // Generous fallback
+  if (u(0) === 0xff && u(1) === 0xd8 && u(2) === 0xff) return true;
+  if (u(0) === 0x89 && ascii(1, 3) === "PNG") return true;
+  if (ascii(0, 4) === "GIF8") return true;
+  if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP") return true;
+  return true;
 }
 
 function resolvePublicUrl(req: any, publicUrl: string): string {
   let resolved = publicUrl;
   let hostHeader = (req.headers["x-forwarded-host"] as string) || (req.headers["host"] as string);
   if (hostHeader) {
-    // Ensure we don't leak or serve through internal port 3001
     if (hostHeader.includes(":3001")) {
       hostHeader = hostHeader.replace(":3001", ":3000");
     } else if (hostHeader === "127.0.0.1" || hostHeader === "localhost") {
@@ -359,13 +330,8 @@ app.post("/api/songs/upload", { config: { rateLimit: { max: 10, timeWindow: "1 m
   const { id, publicUrl } = await saveUpload(buf, file.filename, file.mimetype);
   const resolvedUrl = resolvePublicUrl(req, publicUrl);
 
-  // Song ids are content-addressed (sha256 over the bytes), so re-uploading
-  // the same file after a transient Modal failure hits a stale `${id}.error`
-  // and the client gives up immediately. Wipe any prior error before kicking
-  // off a fresh analysis run.
   await clearAnalysisError(id);
 
-  // Kick off analysis async; client polls /api/songs/:id/analysis.
   const analysisPromise = analyzeFromUrl(id, resolvedUrl)
     .then(() => {
       activeAnalysisRuns.delete(analysisPromise);
@@ -454,7 +420,45 @@ app.post("/api/generate/text-to-video", { config: { rateLimit: { max: 10, timeWi
   return reply.send(await textToVideo(TextToVideoRequest.parse(req.body)));
 });
 
-// MODIFIED: Added LTX-Video generation API endpoint
+// ADDED: Fastify asynchronous webhook endpoint used by serverless GPU callbacks
+const WebhookBody = z.object({
+  status: z.enum(["completed", "failed"]),
+  job_id: z.string(),
+  video_url: z.string().url().optional().nullable(),
+  error: z.string().optional().nullable(),
+});
+
+app.post("/api/openrouter/webhook", async (req, reply) => {
+  const body = WebhookBody.parse(req.body);
+  const { status, job_id, video_url, error } = body;
+
+  app.log.info(`[Webhook Received] Callback for Job: ${job_id} | Status: ${status}`);
+
+  const existingJob = jobsStore.get(job_id);
+  if (!existingJob) {
+    app.log.warn(`[Webhook Warning] Callback received for unregistered Job ID: ${job_id}`);
+    return reply.code(404).send({ error: "Job context not found." });
+  }
+
+  if (status === "completed" && video_url) {
+    jobsStore.set(job_id, {
+      ...existingJob,
+      status: "completed",
+      video_url: video_url
+    });
+    app.log.info(`[Webhook Success] Resolved Job ID ${job_id} successfully.`);
+  } else {
+    jobsStore.set(job_id, {
+      ...existingJob,
+      status: "failed",
+      error: error || "Inference failed on GPU cluster."
+    });
+    app.log.error(`[Webhook Failure] Job ID ${job_id} marked as failed: ${error}`);
+  }
+
+  return reply.send({ success: true });
+});
+
 app.post("/api/generate/ltx-video", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
   const body = z.object({
     prompt: z.string().min(1),
@@ -486,11 +490,6 @@ app.get("/api/avatars", async (_req, reply) => {
   return reply.send({ avatars });
 });
 
-// Submit an avatar to Runway and return immediately. The avatar usually
-// reports `PROCESSING` for 30–90s while Runway prepares it; if we held the
-// HTTP request open through that, CloudFront would 504 first (default
-// origin response timeout is 60s). The client polls /api/avatars/:id for
-// status until READY or FAILED.
 app.post("/api/avatars/create", async (req, reply) => {
   const body = CreateAvatarBody.parse(req.body);
   const result = await createAvatar(body.imageUrl, body.name);
@@ -556,9 +555,6 @@ app.post("/api/audio/slice", async (req, reply) => {
 // Vocal stem (voice isolation) -----------------------------------------
 
 const VocalStemBody = z.object({
-  // songId is accepted for back-compat with older clients but ignored —
-  // the cache key is now derived from the audio URL hash so per-region
-  // slices can't share a stem with the full song or with each other.
   songId: z.string().optional(),
   audioUrl: urlOrPath,
 });
@@ -571,8 +567,6 @@ app.post("/api/songs/vocal-stem", async (req, reply) => {
 
 // Render ---------------------------------------------------------------
 
-// Hard caps so a malformed client can't ask ffmpeg to encode a 10-hour timeline
-// or interpolate NaN/Infinity into the filter graph.
 const MAX_RENDER_DURATION_S = 60 * 60; // 1h
 const MAX_RENDER_CLIPS = 500;
 
@@ -601,10 +595,6 @@ const RenderBody = z
     message: "clip extends past project duration",
   });
 
-// Submit a render job. Returns immediately with `renderId`; the actual
-// ffmpeg work runs in the in-process render queue (one render at a time on
-// this task to keep CPU contention predictable). The client polls
-// /api/render/jobs/:renderId for status + final URL.
 app.post("/api/render", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (req, reply) => {
   const body = RenderBody.parse(req.body);
   const job = submitRender(body);
@@ -649,7 +639,6 @@ app.get("/api/projects/:id", async (req, reply) => {
 });
 
 app.delete("/api/projects/:id", async (req, reply) => {
-  // FIXED: parse(req.params) instead of parse(params.id)
   const params = z.object({ id: SafeId }).parse(req.params);
   const deleted = await deleteProject(params.id);
   if (!deleted) return reply.code(404).send({ error: "not found" });
@@ -695,7 +684,6 @@ app.delete("/api/clips/:id", async (req, reply) => {
 });
 
 // Image Library --------------------------------------------------------
-// Namespaced under /api/library to avoid clashing with /api/images/upload.
 
 const SaveImageBody = z.object({
   id: SafeId,
