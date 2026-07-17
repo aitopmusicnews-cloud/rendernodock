@@ -2,7 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
 
-# Explicitly disable esbuild's postinstall script on your Mac
 allowBuilds:
   sharp: true
   esbuild: false
+  "@swc/core": true
