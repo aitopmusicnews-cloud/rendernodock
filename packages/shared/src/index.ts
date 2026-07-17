@@ -1,13 +1,15 @@
 import { z } from "zod";
 
-export const AudioSection = z.object({
+// Audio section representation
+export const AudioSectionSchema = z.object({
   start: z.number(),
   end: z.number(),
   label: z.string(),
 });
-export type AudioSection = z.infer<typeof AudioSection>;
+export type AudioSection = z.infer<typeof AudioSectionSchema>;
 
-export const AudioAnalysis = z.object({
+// Audio analysis output representation
+export const AudioAnalysisSchema = z.object({
   duration: z.number(),
   bpm: z.number(),
   key: z.string(),
@@ -15,109 +17,167 @@ export const AudioAnalysis = z.object({
   downbeats: z.array(z.number()),
   onsets: z.array(z.number()),
   rmsCurve: z.array(z.number()),
-  sections: z.array(AudioSection),
+  sections: z.array(AudioSectionSchema),
 });
-export type AudioAnalysis = z.infer<typeof AudioAnalysis>;
+export type AudioAnalysis = z.infer<typeof AudioAnalysisSchema>;
+export const AudioAnalysis = AudioAnalysisSchema;
 
-export const Clip = z.object({
+// Individual timeline clip representation
+export const ClipSchema = z.object({
   id: z.string(),
   start: z.number(),
   end: z.number(),
-  source: z.enum(["continue", "archetype", "generated", "textToVideo", "library", "lipSync", "aleph", "upload"]),
+  source: z.string(), // "continue" | "generated" | "lipSync" | "vocal" | "aleph" | "archetype" | "library" | "textToVideo" etc.
   status: z.enum(["empty", "queued", "generating", "ready", "failed"]),
-  prompt: z.string().optional(),
+  generationTaskId: z.string().optional(),
   videoUrl: z.string().optional(),
   thumbnailUrl: z.string().optional(),
-  generationTaskId: z.string().optional(),
-  model: z.string().optional(),
-  referenceImage: z.string().optional(),
-  sectionLabel: z.string().optional(),
-  archetypeUrl: z.string().optional(),
-  bridge: z.boolean().optional(),
-  lastError: z.string().optional(),
+  prompt: z.string().optional(),
   imagePrompt: z.string().optional(),
+  vocalUrl: z.string().optional(),
+  imageUrl: z.string().optional(),
+  model: z.string().optional(),
+  bridge: z.boolean().optional(),
+  archetypeUrl: z.string().optional(),
+  lastError: z.string().optional(),
+  name: z.string().optional(),
 });
-export type Clip = z.infer<typeof Clip>;
+export type Clip = z.infer<typeof ClipSchema>;
 
-export const ProjectSnapshot = z.object({
-  projectId: z.string().optional(),
-  projectName: z.string().optional(),
-  songId: z.string().optional(),
-  songFilename: z.string().optional(),
-  audioUrl: z.string().optional(),
-  analysis: AudioAnalysis.optional(),
-  clips: z.array(Clip).optional(),
-  characterImageUrl: z.string().optional(),
-  avatarId: z.string().optional(),
-  avatarName: z.string().optional(),
-  lookbook: z.array(z.any()).optional(),
+// Complete persistable project snapshot representation
+export const ProjectSnapshotSchema = z.object({
+  projectId: z.string().nullable().optional(),
+  projectName: z.string().nullable().optional(),
+  songId: z.string().nullable().optional(),
+  songFilename: z.string().nullable().optional(),
+  audioUrl: z.string().nullable().optional(),
+  analysis: AudioAnalysisSchema.nullable().optional(),
+  clips: z.array(ClipSchema).optional(),
+  characterImageUrl: z.string().nullable().optional(),
+  avatarId: z.string().nullable().optional(),
+  avatarName: z.string().nullable().optional(),
+  lookbook: z.array(z.string()).optional(),
   zoom: z.number().optional(),
   playhead: z.number().optional(),
 });
-export type ProjectSnapshot = z.infer<typeof ProjectSnapshot>;
+export type ProjectSnapshot = z.infer<typeof ProjectSnapshotSchema>;
+export const ProjectSnapshot = ProjectSnapshotSchema;
 
-export const ImageToVideoRequest = z.object({
-  model: z.string(),
-  promptImage: z.string(),
+// Request validating schemas
+export const ImageToVideoRequestSchema = z.object({
+  promptImage: z.string().optional(),
   promptImageEnd: z.string().optional(),
   promptText: z.string().optional(),
-  ratio: z.string(),
-  duration: z.number(),
+  ratio: z.string().optional(),
+  duration: z.number().optional(),
+  model: z.string().optional(),
 });
-export type ImageToVideoRequest = z.infer<typeof ImageToVideoRequest>;
+export type ImageToVideoRequest = z.infer<typeof ImageToVideoRequestSchema>;
+export const ImageToVideoRequest = ImageToVideoRequestSchema;
 
-export const TextToVideoRequest = z.object({
-  model: z.string(),
-  promptText: z.string(),
-  ratio: z.string(),
-  duration: z.number(),
-});
-export type TextToVideoRequest = z.infer<typeof TextToVideoRequest>;
-
-export const VideoToVideoRequest = z.object({
-  model: z.string(),
+export const VideoToVideoRequestSchema = z.object({
   videoUri: z.string(),
   promptText: z.string().optional(),
   ratio: z.string().optional(),
-  references: z.array(z.string()).optional(),
-});
-export type VideoToVideoRequest = z.infer<typeof VideoToVideoRequest>;
-
-export const TextToImageRequest = z.object({
-  model: z.string(),
-  promptText: z.string(),
-  ratio: z.string(),
-  referenceImages: z.array(z.object({
-    uri: z.string(),
-    tag: z.string().optional(),
-    subject: z.string().optional(),
-  })).optional(),
-  quality: z.string().optional(),
-  outputCount: z.number().optional(),
-});
-export type TextToImageRequest = z.infer<typeof TextToImageRequest>;
-
-export const LipSyncRequest = z.object({
   model: z.string().optional(),
-  audioUri: z.string(),
+});
+export type VideoToVideoRequest = z.infer<typeof VideoToVideoRequestSchema>;
+export const VideoToVideoRequest = VideoToVideoRequestSchema;
+
+export const LipSyncRequestSchema = z.object({
   avatarId: z.string(),
-  videoUrl: z.string().optional(),
-});
-export type LipSyncRequest = z.infer<typeof LipSyncRequest>;
-
-export const VoiceIsolationRequest = z.object({
   audioUri: z.string(),
 });
-export type VoiceIsolationRequest = z.infer<typeof VoiceIsolationRequest>;
+export type LipSyncRequest = z.infer<typeof LipSyncRequestSchema>;
+export const LipSyncRequest = LipSyncRequestSchema;
 
+export const VoiceIsolationRequestSchema = z.object({
+  audioUri: z.string(),
+});
+export type VoiceIsolationRequest = z.infer<typeof VoiceIsolationRequestSchema>;
+export const VoiceIsolationRequest = VoiceIsolationRequestSchema;
+
+export const TextToImageRequestSchema = z.object({
+  promptText: z.string(),
+  model: z.string().optional(),
+  ratio: z.string().optional(),
+  referenceImages: z.array(z.object({ uri: z.string() })).optional(),
+});
+export type TextToImageRequest = z.infer<typeof TextToImageRequestSchema>;
+export const TextToImageRequest = TextToImageRequestSchema;
+
+export const TextToVideoRequestSchema = z.object({
+  promptText: z.string(),
+  model: z.string().optional(),
+  ratio: z.string().optional(),
+  duration: z.number().optional(),
+});
+export type TextToVideoRequest = z.infer<typeof TextToVideoRequestSchema>;
+export const TextToVideoRequest = TextToVideoRequestSchema;
+
+// GenerationModel string representation
+export type GenerationModel = string;
+
+// Task status interface
+export interface Task {
+  status: "SUCCEEDED" | "FAILED" | "CANCELLED" | "PROCESSING" | "PENDING";
+  error?: string;
+  output?: string[];
+}
+
+// Avatar summary
 export interface AvatarSummary {
   id: string;
   name: string;
-  status: "PROCESSING" | "READY" | "FAILED" | "PAUSED" | "UNKNOWN" | string;
+  status: string;
   imageUri: string;
   createdAt: string;
 }
 
+// Saved image
+export interface SavedImage {
+  id: string;
+  name: string;
+  url: string;
+  source: string;
+  prompt: string | null;
+  model: string | null;
+  savedAt: string;
+  folderId?: string | null;
+}
+
+// Library folder representation
+export interface LibraryFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  type: "clips" | "images";
+  createdAt: string;
+}
+
+// Project metadata
+export interface ProjectMeta {
+  id: string;
+  name: string;
+  savedAt: string;
+  thumbnailUrl: string | null;
+}
+
+// Persisted saved project
+export interface SavedProject extends ProjectMeta {
+  state: Record<string, unknown>;
+  files: string[];
+}
+
+// Render library entry
+export interface RenderEntry {
+  name: string;
+  url: string;
+  size: number;
+  modifiedAt: string;
+}
+
+// Saved clip library item
 export interface SavedClip {
   id: string;
   name: string;
@@ -132,125 +192,20 @@ export interface SavedClip {
   generationTaskId?: string | null;
 }
 
-export interface SavedImage {
-  id: string;
-  name: string;
-  url: string;
-  source: string;
-  prompt: string | null;
-  model: string | null;
-  savedAt: string;
-  folderId?: string | null;
-}
-
-export interface LibraryFolder {
-  id: string;
-  name: string;
-  parentId: string | null;
-  type: "clips" | "images";
-  createdAt: string;
-}
-
-export interface ProjectMeta {
-  id: string;
-  name: string;
-  savedAt: string;
-  thumbnailUrl: string | null;
-}
-
-export interface SavedProject {
-  id: string;
-  name: string;
-  savedAt: string;
-  thumbnailUrl: string | null;
-  state: Record<string, unknown>;
-  files: string[];
-}
-
-export interface RenderEntry {
-  name: string;
-  url: string;
-  size: number;
-  modifiedAt: string;
-}
-
-export interface Task {
-  id: string;
-  status: string;
-  createdAt: string;
-  progress?: number;
-  output?: string[] | string | null;
-  error?: string;
-  errorCode?: string;
-}
-
-export type GenerationModel =
-  | "openrouter_ultra"
-  | "openrouter_flash"
-  | "local_wan21"
-  | "seedance2"
-  | "veo3.1"
-  | "veo3.1_fast"
-  | "openrouter_aleph"
-  | string;
-
-export type TextToImageModel =
-  | "openrouter_image_ultra"
-  | "openrouter_image_flash"
-  | "local_wan21_image"
-  | "gpt_image_2"
-  | "gemini_image3_pro"
-  | "gemini_2.5_flash"
-  | string;
-
-export type TextToImageRatio = string;
-
+// Utility function to convert errors to readable messages
 export function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === "string") return err;
+  if (err && typeof err === "object" && "message" in err) return String((err as any).message);
   return String(err);
 }
 
+// Utility function to check if a model supports transition bridging
 export function modelSupportsBridge(model: string): boolean {
-  return ["seedance2", "veo3.1", "veo3.1_fast"].includes(model);
+  return ["seedance2", "gen4_aleph", "veo3.1", "veo3.1_fast", "gen4.5", "gen4_turbo"].includes(model);
 }
 
-export function formatModelName(model?: string | null): string {
-  if (!model) return "";
-  const mapping: Record<string, string> = {
-    "openrouter_ultra": "OpenRouter Ultra (Gemini 2.5 Pro)",
-    "openrouter_flash": "OpenRouter Flash (Gemini 2.5 Flash)",
-    "local_wan21": "Wan v2.1 (Local Self-Hosted)",
-    "seedance2": "SeedDance 2",
-    "veo3.1": "Veo 3.1",
-    "veo3.1_fast": "Veo 3.1 Fast",
-    "openrouter_aleph": "OpenRouter Aleph",
-    "openrouter_image_ultra": "OpenRouter Image Ultra",
-    "openrouter_image_flash": "OpenRouter Image Flash",
-    "local_wan21_image": "Wan v2.1 Image (Local)",
-    "gpt_image_2": "GPT Image 2",
-    "gemini_image3_pro": "Imagen 3 Pro",
-    "gemini_2.5_flash": "Gemini Flash",
-  };
-  return mapping[model] ?? model;
-}
+// Text to image model and ratio types
+export type TextToImageModel = string;
+export type TextToImageRatio = string;
 
-export function getProviderFromTaskId(taskId?: string | null): string {
-  if (!taskId) return "";
-  try {
-    const base64 = taskId.replace(/-/g, "+").replace(/_/g, "/");
-    const jsonStr = typeof atob === "function" 
-      ? atob(base64) 
-      : (globalThis as any).Buffer.from(base64, "base64").toString("utf8");
-    const parsed = JSON.parse(jsonStr);
-    if (parsed && parsed.source) {
-      if (parsed.source === "procedural") return "Local Procedural";
-      if (parsed.source === "openrouter") return "OpenRouter";
-      if (parsed.source === "fal") return "Fal AI";
-      return String(parsed.source);
-    }
-  } catch (e) {
-    // Treat raw as OpenRouter/Procedural
-  }
-  return "";
-}
