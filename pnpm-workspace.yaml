@@ -1,8 +1,3 @@
 packages:
   - "apps/*"
   - "packages/*"
-
-allowBuilds:
-  sharp: true
-  esbuild: false
-  "@swc/core": true
