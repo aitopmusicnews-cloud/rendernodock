@@ -55,17 +55,10 @@ export function Timeline() {
   const mergeWithRight = useStore((s) => s.mergeWithRight);
   const splitPreviewTime = useStore((s) => s.splitPreviewTime);
   const updateClip = useStore((s) => s.updateClip);
-  const unloadSong = useStore((s) => s.unloadSong);
-
-  const [audioError, setAudioError] = useState<string | null>(null);
   const tracksRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-
-  useEffect(() => {
-    setAudioError(null);
-  }, [audioUrl]);
 
   const onClipDrop = useCallback(async (clipId: string, file: File) => {
     if (!isVideoFile(file)) {
@@ -320,18 +313,7 @@ export function Timeline() {
               onTime={setPlayhead}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
-              onError={(err) => setAudioError(err?.message || "Failed to load audio")}
             />
-            {audioError && (
-              <div className="audio-error-overlay">
-                <span className="audio-error-text">
-                  Audio file could not be loaded ({audioError === "Failed to fetch" ? "404 Not Found" : audioError}). The file may have expired.
-                </span>
-                <button type="button" className="btn primary" onClick={unloadSong}>
-                  Re-upload Song
-                </button>
-              </div>
-            )}
             <BeatGrid analysis={analysis} />
             <ClipBoundaries clips={clips} duration={duration} />
             {tracksWidth > 0 && (

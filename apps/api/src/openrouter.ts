@@ -23,7 +23,7 @@ export interface JobRecord {
   createdAt: number;
 }
 
-const MODAL_ENDPOINT_URL = config.MODAL_LTX_URL || 'https://cdtfullsail--mvs-ltx-video-generate.modal.run';
+const MODAL_ENDPOINT_URL = config.MODAL_LTX_URL || '';
 const PUBLIC_API_URL = config.PUBLIC_BASE_URL || 'http://localhost:3001';
 
 /**

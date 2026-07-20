@@ -1,7 +1,5 @@
 import io
-import os
 import uuid
-import requests
 from pathlib import Path
 import modal
 
@@ -15,12 +13,12 @@ output_volume = modal.Volume.from_name("mvs-ltx-outputs", create_if_missing=True
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("python3-opencv", "ffmpeg", "git")
-    .uv_pip_install(
-        "git+https://github.com/huggingface/diffusers.git",
+    .pip_install(
+        "diffusers==0.32.2",
         "av",
         "accelerate>=1.4.0",
         "fastapi[standard]>=0.115.8",
-        "huggingface-hub>=0.36.0",
+        "huggingface-hub>=0.27.0",
         "imageio>=2.37.0",
         "imageio-ffmpeg>=0.6.0",
         "opencv-python>=4.11.0.86",
@@ -35,12 +33,11 @@ image = (
 )
 
 with image.imports():
-    import torch
-    import httpx
-    from PIL import Image
-    from diffusers import LTX2Pipeline
-    from diffusers.utils import encode_video
-    from diffusers.pipelines.ltx2.utils import DEFAULT_NEGATIVE_PROMPT
+    import torch  # type: ignore[import-untyped]
+    import httpx  # type: ignore[import-untyped]
+    from PIL import Image  # type: ignore[import-untyped]
+    from diffusers import LTXVideoPipeline, LTXImageToVideoPipeline  # type: ignore[import-untyped]
+    from diffusers.utils import export_to_video  # type: ignore[import-untyped]
 
 @app.cls(
     image=image,
@@ -51,59 +48,72 @@ with image.imports():
 class LTXGenerator:
     @modal.enter()
     def load_model(self):
-        print("[LTX-2] Loading joint audio-video foundation weights...")
-        self.pipe = LTX2Pipeline.from_pretrained(
-            "diffusers/LTX-2.3-Diffusers",
+        print("[LTX] Loading LTX-Video weights...")
+        self.t2v_pipe = LTXVideoPipeline.from_pretrained(
+            "Lightricks/LTX-Video",
+            torch_dtype=torch.bfloat16,
+        ).to("cuda")
+        self.i2v_pipe = LTXImageToVideoPipeline.from_pretrained(
+            "Lightricks/LTX-Video",
             torch_dtype=torch.bfloat16,
         ).to("cuda")
 
     @modal.method()
     def generate_clip(self, prompt: str, duration_sec: float, init_image_url: str = None) -> str:
-        fps = 24.0
+        fps = 24
         num_frames = int(duration_sec * fps)
+        # LTX-Video requires (num_frames - 1) divisible by 8, min 9
         num_frames = ((num_frames - 1) // 8) * 8 + 1
-        num_frames = max(9, min(num_frames, 121))
+        num_frames = max(9, min(num_frames, 257))
 
-        pipeline_kwargs = {
-            "prompt": prompt,
-            "negative_prompt": DEFAULT_NEGATIVE_PROMPT,
-            "width": 768,
-            "height": 512,
-            "num_frames": num_frames,
-            "frame_rate": fps,
-            "num_inference_steps": 30,
-            "guidance_scale": 3.0,
-            "output_type": "np",
-            "return_dict": False,
-        }
+        negative_prompt = "worst quality, inconsistent motion, blurry, jittery, distorted"
+
+        filename = f"ltx-{uuid.uuid4()}.mp4"
+        filepath = Path(OUTPUT_DIR) / filename
 
         if init_image_url:
-            print(f"[LTX-2] Processing initial reference frame condition: {init_image_url}")
+            print(f"[LTX] Image-to-video from: {init_image_url}")
             try:
                 with httpx.Client(timeout=30.0, follow_redirects=True) as client:
                     response = client.get(init_image_url)
                     response.raise_for_status()
                     init_image = Image.open(io.BytesIO(response.content)).convert("RGB")
                     init_image = init_image.resize((768, 512), Image.Resampling.LANCZOS)
-                    pipeline_kwargs["image"] = init_image
+                result = self.i2v_pipe(
+                    image=init_image,
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    width=768,
+                    height=512,
+                    num_frames=num_frames,
+                    num_inference_steps=30,
+                    guidance_scale=3.0,
+                ).frames[0]
             except Exception as e:
-                print(f"[LTX-2 Warning] Failed to process image conditioning: {str(e)}")
+                print(f"[LTX Warning] Image conditioning failed ({e}), falling back to t2v")
+                result = self.t2v_pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    width=768,
+                    height=512,
+                    num_frames=num_frames,
+                    num_inference_steps=30,
+                    guidance_scale=3.0,
+                ).frames[0]
+        else:
+            print(f"[LTX] Text-to-video for: '{prompt}'")
+            result = self.t2v_pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                width=768,
+                height=512,
+                num_frames=num_frames,
+                num_inference_steps=30,
+                guidance_scale=3.0,
+            ).frames[0]
 
-        print(f"[LTX-2] Spawning joint audio-video generation pass for: '{prompt}'")
-        video_tensors, audio_tensors = self.pipe(**pipeline_kwargs)
-
-        filename = f"ltx2-{uuid.uuid4()}.mp4"
-        filepath = Path(OUTPUT_DIR) / filename
-
-        encode_video(
-            video_tensors[0],
-            fps=fps,
-            audio=audio_tensors[0].float().cpu(),
-            audio_sample_rate=self.pipe.vocoder.config.output_sampling_rate,
-            output_path=str(filepath),
-        )
-        
-        print(f"[LTX-2] Rendered output saved to: {filename}")
+        export_to_video(result, str(filepath), fps=fps)
+        print(f"[LTX] Saved: {filename}")
         output_volume.commit()
         return filename
 
@@ -127,7 +137,6 @@ def generate(payload: dict):
         # Trigger the webhook callback back to Node.js if provided
         if webhook_url:
             print(f"[Webhook] Dispatching success callback to: {webhook_url}")
-            import httpx
             httpx.post(webhook_url, json={
                 "status": "completed",
                 "job_id": job_id,
@@ -139,7 +148,6 @@ def generate(payload: dict):
     except Exception as e:
         print(f"[Modal Error] Generation failed: {str(e)}")
         if webhook_url:
-            import httpx
             try:
                 httpx.post(webhook_url, json={
                     "status": "failed",
@@ -153,9 +161,12 @@ def generate(payload: dict):
 @app.function(image=image, volumes={OUTPUT_DIR: output_volume})
 @modal.fastapi_endpoint(method="GET")
 def get_file(filename: str):
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, JSONResponse  # type: ignore[import-untyped]
     output_volume.reload()
-    filepath = Path(OUTPUT_DIR) / filename
+    base = Path(OUTPUT_DIR).resolve()
+    filepath = (base / filename).resolve()
+    if not filepath.is_relative_to(base):
+        return JSONResponse({"error": "Invalid filename"}, status_code=400)
     if filepath.exists():
         return FileResponse(filepath, media_type="video/mp4")
-    return {"error": "Clip not found"}, 404
+    return JSONResponse({"error": "Clip not found"}, status_code=404)

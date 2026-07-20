@@ -1,9 +1,13 @@
 import io
-import os
 from pathlib import Path
 import modal
 
 app = modal.App("mvs-media-suite")
+
+# Base URL for the get-file endpoint — set MODAL_MEDIA_SUITE_URL env var after
+# first deploy, or override here. Pattern: https://<user>--mvs-media-suite-get-file.modal.run
+import os
+GET_FILE_URL = os.environ.get("MODAL_MEDIA_SUITE_URL", "https://cdtfullsail--mvs-media-suite-get-file.modal.run")
 
 # Shared Persistent Volume for output assets
 output_volume = modal.Volume.from_name("mvs-suite-outputs", create_if_missing=True)
@@ -23,6 +27,10 @@ image = (
     )
 )
 
+with image.imports():
+    import torch  # type: ignore[import-untyped]
+    from diffusers import DiffusionPipeline  # type: ignore[import-untyped]
+
 # ----------------------------------------------------------------------
 # 1. TEXT TO IMAGE WORKER (SDXL / Flux)
 # ----------------------------------------------------------------------
@@ -30,8 +38,6 @@ image = (
 class ImageGenerator:
     @modal.enter()
     def load_pipeline(self):
-        import torch
-        from diffusers import DiffusionPipeline
         self.pipe = DiffusionPipeline.from_pretrained(
             "stabilityai/stable-diffusion-xl-base-1.0", 
             torch_dtype=torch.float16, 
@@ -40,7 +46,7 @@ class ImageGenerator:
 
     @modal.method()
     def generate(self, prompt: str) -> str:
-        import uuid
+        import uuid  # stdlib, fine locally
         image_out = self.pipe(prompt=prompt, num_inference_steps=25).images[0]
         
         filename = f"img-{uuid.uuid4()}.png"
@@ -72,7 +78,7 @@ def text_to_image(payload: dict):
     prompt = payload.get("prompt", "")
     gen = ImageGenerator()
     filename = gen.generate.remote(prompt)
-    return {"image_url": f"https://cdtfullsail--mvs-media-suite-get-file.modal.run?filename={filename}"}
+    return {"image_url": f"{GET_FILE_URL}?filename={filename}"}
 
 @app.function(image=image, volumes={OUTPUT_DIR: output_volume})
 @modal.fastapi_endpoint(method="POST")
@@ -80,15 +86,18 @@ def lip_sync(payload: dict):
     image_url = payload.get("image_url", "")
     audio_url = payload.get("audio_url", "")
     filename = process_lipsync.remote(image_url, audio_url)
-    return {"video_url": f"https://cdtfullsail--mvs-media-suite-get-file.modal.run?filename={filename}"}
+    return {"video_url": f"{GET_FILE_URL}?filename={filename}"}
 
 @app.function(image=image, volumes={OUTPUT_DIR: output_volume})
 @modal.fastapi_endpoint(method="GET")
 def get_file(filename: str):
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, JSONResponse  # type: ignore[import-untyped]
     output_volume.reload()
-    filepath = Path(OUTPUT_DIR) / filename
+    base = Path(OUTPUT_DIR).resolve()
+    filepath = (base / filename).resolve()
+    if not filepath.is_relative_to(base):
+        return JSONResponse({"error": "Invalid filename"}, status_code=400)
     if filepath.exists():
         media_type = "image/png" if filename.endswith(".png") else "video/mp4"
         return FileResponse(filepath, media_type=media_type)
-    return {"error": "Asset not found"}, 404
+    return JSONResponse({"error": "Asset not found"}, status_code=404)

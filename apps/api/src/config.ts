@@ -57,6 +57,19 @@ if (!parsed.success) {
 
 export const config = parsed.data;
 
+if (!config.FAL_API_SECRET) {
+  console.log(
+    "INFO: FAL_API_SECRET is not set. /api/generate/* calls will 401. " +
+      "Other endpoints (audio, render) still work."
+  );
+}
+
+if (!config.OPENROUTER_API_KEY) {
+  console.log(
+    "INFO: OPENROUTER_API_KEY is not set. OpenRouter prompt enhancement will be disabled."
+  );
+}
+
 // ADDED: Logs a warning if your LTX Video variable is missing
 if (!config.MODAL_LTX_URL) {
   console.log(
