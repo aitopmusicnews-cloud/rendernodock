@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: rendernodock
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: WEB_ORIGIN
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: google/gemini-2.5-flash
+      - key: MODAL_AUDIO_URL
+        sync: false
+      - key: MODAL_LTX_URL
+        sync: false
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_PUBLIC_URL_BASE
+        sync: false
