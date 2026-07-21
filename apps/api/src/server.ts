@@ -598,7 +598,7 @@ const RenderBody = z
 
 app.post("/api/render", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (req, reply) => {
   const body = RenderBody.parse(req.body);
-  const job = submitRender(body);
+  const job = submitRender(body as any);
   return reply.send({
     renderId: job.id,
     state: job.state,
@@ -679,7 +679,7 @@ app.post("/api/clips/save", async (req, reply) => {
     ...body,
     prompt: body.prompt || "",
     sectionLabel: body.sectionLabel || "General"
-  });
+  } as any);
   return reply.send(saved);
 });
 

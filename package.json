@@ -31,5 +31,8 @@
   },
   "dependencies": {
     "esbuild": "0.17.19"
+  },
+  "overrides": {
+    "esbuild": "0.17.19"
   }
 }
