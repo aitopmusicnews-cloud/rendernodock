@@ -1,35 +1,32 @@
 services:
   - type: web
-    name: rendernodock
-    runtime: node
-    region: oregon
-    plan: starter
-    buildCommand: npm install --include=dev && npm run build
-    startCommand: npm run start
-    healthCheckPath: /health
-    numInstances: 1
+    name: apps-api
+    env: node
+    plan: free
+    buildCommand: npm run build --workspace=apps/api
+    startCommand: node apps/api/dist/server.js
     envVars:
-      - key: NODE_ENV
-        value: production
       - key: PORT
         value: 3001
-      - key: WEB_DIST_DIR
-        value: apps/web/dist
-      - key: PUBLIC_BASE_URL
-        sync: false
-      - key: WEB_ORIGIN
-        sync: false
-      - key: STORAGE_BACKEND
-        value: s3
       - key: S3_BUCKET
-        sync: false
-      - key: S3_REGION
-        sync: false
+        value: rendernodock-storage-052080186671-us-east-1-an
       - key: AWS_ACCESS_KEY_ID
-        sync: false
+        value: AKIAQYIBYSUXZOMQRJPW
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
+      - key: AWS_REGION
+        value: us-east-1
+      - key: PUBLIC_BASE_URL
+        value: https://onrender.com
       - key: MODAL_AUDIO_URL
-        sync: false
+        value: https://modal.run
+      - key: MODAL_IMAGE_URL
+        value: https://modal.run
+      - key: MODAL_LIPSYNC_URL
+        value: https://modal.run
       - key: MODAL_LTX_URL
+        value: https://modal.run
+      - key: FAL_API_SECRET
+        sync: false
+      - key: OPENROUTER_API_KEY
         sync: false
