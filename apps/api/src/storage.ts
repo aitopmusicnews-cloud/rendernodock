@@ -6,19 +6,19 @@ export const BUCKET_NAME = process.env.AWS_S3_BUCKET || "";
 export const paths = { uploads: "./uploads", analysis: "./analysis", RENDERS: "./renders" };
 export class CorruptAnalysisError extends Error {}
 export const storage = { bucket: BUCKET_NAME, client: s3Client,
-  async saveUpload(buffer, filename, mimeType) { const ext = path.extname(filename); const clean = path.basename(filename, ext).replace(/[^a-zA-Z0-9_]/g, ""); const fileId = `${Date.now()}_${clean}${ext}`; const key = `uploads/${fileId}`; await s3Client.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: buffer, ContentType: mimeType || "application/octet-stream" })); return { id: fileId, publicUrl: `https://${BUCKET_NAME}://{key}` }; },
-  async saveRender(outputPath, outputName) { const buffer = await fs.promises.readFile(outputPath); const key = `renders/${outputName}`; await s3Client.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: buffer, ContentType: "video/mp4" })); return { publicUrl: `https://${BUCKET_NAME}://{key}` }; },
-  async saveJson(key, data) { await s3Client.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: JSON.stringify(data), ContentType: "application/json" })); },
-  async loadJson(key) { try { const res = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key })); return JSON.parse(await res.Body.transformToString()); } catch { return { id: "fallback", clips: [], sections: [], markers: [], tracks: [], state: {}, duration: 0 }; } },
-  async listJson() { return []; },
-  async deleteJson(key) { try { await s3Client.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key })); return true; } catch { return false; } },
-  async listFiles() { return []; } };
-export async function ensureDir(dirPath) { if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true }); }
-export async function saveUpload(buffer, filename, mimeType) { return storage.saveUpload(buffer, filename, mimeType); }
-export async function readAnalysis(id) { try { const res = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: `analysis/${id}.json` })); return JSON.parse(await res.Body.transformToString()); } catch { return { id, status: "ready", duration: 180, tempo: 120, bpm: 120, key: "C", clips: [], segments: [], bars: [], tatums: [], markers: [], tracks: [], chords: [], rhythm: [], vocalStems: [], beats: [{ start: 0, duration: 0.5, confidence: 1 }], sections: [{ start: 0, end: 15, duration: 15, label: "Intro" }], analysis: { clips: [], sections: [], beats: [], segments: [], bars: [], tatums: [], markers: [], tracks: [] } }; } }
-export async function writeAnalysis(id, data) { await s3Client.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: `analysis/${id}.json`, Body: JSON.stringify(data), ContentType: "application/json" })); }
-export async function writeAnalysisError() {}
-export async function readAnalysisError() { return null; }
-export async function clearAnalysisError() {}
-export async function readVocalStemUrl() { return ""; }
-export async function writeVocalStemUrl() {}
+  async saveUpload(buffer: Buffer, filename: string, mimeType?: string) { const ext = path.extname(filename); const clean = path.basename(filename, ext).replace(/[^a-zA-Z0-9_]/g, ""); const fileId = `${Date.now()}_${clean}${ext}`; const key = `uploads/${fileId}`; await s3Client.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: buffer, ContentType: mimeType || "application/octet-stream" })); return { id: fileId, publicUrl: `https://${BUCKET_NAME}://{key}` }; },
+  async saveRender(outputPath: string, outputName: string, mimeType?: string) { const buffer = await fs.promises.readFile(outputPath); const key = `renders/${outputName}`; await s3Client.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: buffer, ContentType: mimeType || "video/mp4" })); return { publicUrl: `https://${BUCKET_NAME}://{key}` }; },
+  async saveJson(key: string, data: any): Promise<void> { await s3Client.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: key, Body: JSON.stringify(data), ContentType: "application/json" })); },
+  async loadJson<T = any>(key: string): Promise<T> { try { const res = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key })); return JSON.parse(await res.Body!.transformToString()) as T; } catch { return { id: "fallback", clips: [], sections: [], markers: [], tracks: [], state: {}, duration: 0 } as unknown as T; } },
+  async listJson(prefix?: string): Promise<string[]> { return []; },
+  async deleteJson(key: string): Promise<boolean> { try { await s3Client.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key })); return true; } catch { return false; } },
+  async listFiles(prefix?: string): Promise<any[]> { return []; } };
+export async function ensureDir(dirPath: string): Promise<void> { if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true }); }
+export async function saveUpload(buffer: Buffer, filename: string, mimeType?: string) { return storage.saveUpload(buffer, filename, mimeType); }
+export async function readAnalysis(id: string): Promise<any> { try { const res = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: `analysis/${id}.json` })); return JSON.parse(await res.Body!.transformToString()); } catch { return { id, status: "ready", duration: 180, tempo: 120, bpm: 120, key: "C", clips: [], segments: [], bars: [], tatums: [], markers: [], tracks: [], chords: [], rhythm: [], vocalStems: [], beats: [{ start: 0, duration: 0.5, confidence: 1 }], sections: [{ start: 0, end: 15, duration: 15, label: "Intro" }], analysis: { clips: [], sections: [], beats: [], segments: [], bars: [], tatums: [], markers: [], tracks: [] } }; } }
+export async function writeAnalysis(id: string, data: any): Promise<void> { await s3Client.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: `analysis/${id}.json`, Body: JSON.stringify(data), ContentType: "application/json" })); }
+export async function writeAnalysisError(id?: string, err?: any): Promise<void> {}
+export async function readAnalysisError(id?: string): Promise<any> { return null; }
+export async function clearAnalysisError(id?: string): Promise<void> {}
+export async function readVocalStemUrl(id?: string): Promise<string> { return ""; }
+export async function writeVocalStemUrl(id?: string, url?: string): Promise<void> {}
