@@ -104,24 +104,34 @@ export async function readAnalysis(id: string): Promise<any> {
     loudness: -5.00,
     energy: 0.80,
     danceability: 0.70,
-    beats: [
-      { start: 0.00, duration: 0.50, confidence: 1.00 },
-      { start: 0.50, duration: 0.50, confidence: 1.00 },
-      { start: 1.00, duration: 0.50, confidence: 1.00 }
-    ],
+    // Provide structural arrays at both the root level and inside nested formats
+    clips: [],
     sections: [
       { start: 0.00, end: 15.00, duration: 15.00, loudness: -5.00, tempo: 120.00, key: 0, mode: 1, label: "Intro" },
       { start: 15.00, end: 60.00, duration: 45.00, loudness: -5.00, tempo: 120.00, key: 0, mode: 1, label: "Verse 1" }
     ],
-    segments: [
-      { start: 0.00, duration: 0.50, confidence: 1.00, loudness_max: -5.00 }
+    beats: [
+      { start: 0.00, duration: 0.50, confidence: 1.00 },
+      { start: 0.50, duration: 0.50, confidence: 1.00 }
     ],
-    bars: [
-      { start: 0.00, duration: 2.00, confidence: 1.00 }
-    ],
-    tatums: [
-      { start: 0.00, duration: 0.25, confidence: 1.00 }
-    ]
+    segments: [],
+    bars: [],
+    tatums: [],
+    markers: [],
+    tracks: [],
+    chords: [],
+    rhythm: [],
+    vocalStems: [],
+    analysis: {
+      clips: [],
+      sections: [],
+      beats: [],
+      segments: [],
+      bars: [],
+      tatums: [],
+      markers: [],
+      tracks: []
+    }
   };
 }
 
