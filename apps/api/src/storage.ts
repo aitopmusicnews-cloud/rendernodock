@@ -40,7 +40,7 @@ export const storage = {
 
     async saveUpload(buffer: Buffer, filename: string, mimeType?: string) {
     const ext = path.extname(filename);
-    const cleanBase = path.basename(filename, ext).replace(/[^a-zA-Z0-9]/g, "_");
+    const cleanBase = path.basename(filename, ext).replace(/[^a-zA-Z0-9_]/g, "");
     const fileId = `${Date.now()}_${cleanBase}${ext}`;
     return {
       id: fileId,
@@ -78,7 +78,7 @@ export async function ensureDir(dirPath: string): Promise<void> {
 
 export async function saveUpload(buffer: Buffer, filename: string, mimeType?: string) {
   const ext = path.extname(filename);
-  const cleanBase = path.basename(filename, ext).replace(/[^a-zA-Z0-9]/g, "_");
+  const cleanBase = path.basename(filename, ext).replace(/[^a-zA-Z0-9_]/g, "");
   const fileId = `${Date.now()}_${cleanBase}${ext}`;
   return {
     id: fileId,
