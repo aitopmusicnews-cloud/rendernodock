@@ -97,18 +97,31 @@ export async function readAnalysis(id: string): Promise<any> {
   return {
     id,
     status: "ready",
-    duration: 180,
-    tempo: 120,
+    duration: 180.00,
+    tempo: 120.00,
+    bpm: 120.00,
     key: "C",
-    beats: [0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
-    sections: [
-      { start: 0, end: 15, label: "Intro" },
-      { start: 15, end: 60, label: "Verse 1" },
-      { start: 60, end: 90, label: "Chorus" }
+    loudness: -5.00,
+    energy: 0.80,
+    danceability: 0.70,
+    beats: [
+      { start: 0.00, duration: 0.50, confidence: 1.00 },
+      { start: 0.50, duration: 0.50, confidence: 1.00 },
+      { start: 1.00, duration: 0.50, confidence: 1.00 }
     ],
-    segments: [],
-    tatums: [],
-    bars: []
+    sections: [
+      { start: 0.00, end: 15.00, duration: 15.00, loudness: -5.00, tempo: 120.00, key: 0, mode: 1, label: "Intro" },
+      { start: 15.00, end: 60.00, duration: 45.00, loudness: -5.00, tempo: 120.00, key: 0, mode: 1, label: "Verse 1" }
+    ],
+    segments: [
+      { start: 0.00, duration: 0.50, confidence: 1.00, loudness_max: -5.00 }
+    ],
+    bars: [
+      { start: 0.00, duration: 2.00, confidence: 1.00 }
+    ],
+    tatums: [
+      { start: 0.00, duration: 0.25, confidence: 1.00 }
+    ]
   };
 }
 
