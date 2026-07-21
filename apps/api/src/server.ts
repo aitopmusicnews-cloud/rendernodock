@@ -48,7 +48,12 @@ import {
   TextToVideoRequest,
 } from "@mvs/shared";
 
-const SafeId = z
+const SafeId = z.preprocess((val) => {
+  if (typeof val !== "string") return val;
+  return val.replace(/[^a-zA-Z0-9_.-]/g, "_");
+}, z.string()); // loose layout wrapper
+
+const _UnusedSafeId = z
   .string()
   .min(1)
   .max(500)
