@@ -1205,3 +1205,6 @@ body.dragging-resize .resize-handle { background: rgba(255, 107, 0, 0.6); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; border: 2px solid var(--surface); }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+
+#root, body, html { height: auto !important; min-height: 100vh; overflow-y: auto !important; }
