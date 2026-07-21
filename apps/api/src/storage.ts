@@ -39,7 +39,8 @@ export const storage = {
   client: s3Client,
 
   async saveUpload(buffer: Buffer, filename: string, mimeType?: string) {
-    const fileId = `${Date.now()}-${filename.replace(/\s+/g, "-")}`;
+    const safeName = filename.replace(/[^a-zA-Z0-9.]/g, "_");
+    const fileId = `${Date.now()}_${safeName}`;
     return {
       id: fileId,
       publicUrl: `/uploads/${fileId}`
@@ -75,7 +76,8 @@ export async function ensureDir(dirPath: string): Promise<void> {
 }
 
 export async function saveUpload(buffer: Buffer, filename: string, mimeType?: string) {
-  const fileId = `${Date.now()}-${filename}`;
+  const safeName = filename.replace(/[^a-zA-Z0-9.]/g, "_");
+  const fileId = `${Date.now()}_${safeName}`;
   return {
     id: fileId,
     publicUrl: `/uploads/${fileId}`
