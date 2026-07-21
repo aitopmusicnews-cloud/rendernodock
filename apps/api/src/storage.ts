@@ -56,7 +56,14 @@ export const storage = {
 
   async saveJson(key: string, data: any): Promise<void> {},
   async loadJson<T = any>(key: string): Promise<T> {
-    return {} as T;
+    // Safely yields empty arrays to prevent mapping errors like flatMap failures
+    const fallback = {
+      clips: [],
+      sections: [],
+      markers: [],
+      tracks: []
+    };
+    return fallback as unknown as T;
   },
   async listJson(prefix: string): Promise<string[]> {
     return [];
