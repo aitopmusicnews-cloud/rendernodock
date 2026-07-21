@@ -48,12 +48,7 @@ import {
   TextToVideoRequest,
 } from "@mvs/shared";
 
-const SafeId = z.preprocess((val) => {
-  if (typeof val !== "string") return val;
-  return val.replace(/[^a-zA-Z0-9_.-]/g, "_");
-}, z.string()); // loose layout wrapper
-
-const _UnusedSafeId = z
+const SafeId = z
   .string()
   .min(1)
   .max(500)
@@ -68,7 +63,7 @@ const app = Fastify({
   maxParamLength: 500,
 });
 
-const webOrigins = config.WEB_ORIGIN.split(",")?.map?.((s) => s.trim())?.filter?.(Boolean);
+const webOrigins = config.WEB_ORIGIN.split(",").map((s) => s.trim()).filter(Boolean);
 await app.register(cors, {
   origin: (origin, cb) => {
     if (!origin) {
@@ -109,7 +104,7 @@ const possibleDirs = [
   "apps/web/dist",
   "../web/dist",
   "../../apps/web/dist"
-]?.filter?.(Boolean) as string[];
+].filter(Boolean) as string[];
 
 for (const dir of possibleDirs) {
   const p1 = resolve(dir);
@@ -226,7 +221,7 @@ app.setErrorHandler((err: any, req, reply) => {
   }
 
   if (err instanceof z.ZodError) {
-    return reply.code(400).send({ error: err.issues?.map?.((e) => e.message).join("; ") });
+    return reply.code(400).send({ error: err.errors.map((e) => e.message).join("; ") });
   }
   if (err instanceof FfmpegError) {
     req.log.error({ err, stderr: err.stderr }, "ffmpeg failure");
@@ -332,8 +327,7 @@ app.post("/api/songs/upload", { config: { rateLimit: { max: 10, timeWindow: "1 m
   if (!sniffMatches(buf, "audio")) {
     return reply.code(400).send({ error: "file content is not a recognized audio format" });
   }
-  const safeName = file.filename.replace(/[^a-zA-Z0-9.-]/g, "_");
-  const { id, publicUrl } = await saveUpload(buf, safeName, file.mimetype);
+  const { id, publicUrl } = await saveUpload(buf, file.filename, file.mimetype);
   const resolvedUrl = resolvePublicUrl(req, publicUrl);
 
   await clearAnalysisError(id);
@@ -364,8 +358,7 @@ app.post("/api/images/upload", { config: { rateLimit: { max: 20, timeWindow: "1 
   if (!sniffMatches(buf, "image")) {
     return reply.code(400).send({ error: "file content is not a recognized image format" });
   }
-  const safeName = file.filename.replace(/[^a-zA-Z0-9.-]/g, "_");
-  const { id, publicUrl } = await saveUpload(buf, safeName, file.mimetype);
+  const { id, publicUrl } = await saveUpload(buf, file.filename, file.mimetype);
   const resolvedUrl = resolvePublicUrl(req, publicUrl);
   return reply.send({ id, url: resolvedUrl });
 });
@@ -382,8 +375,7 @@ app.post("/api/videos/upload", { config: { rateLimit: { max: 20, timeWindow: "1 
   if (!sniffMatches(buf, "video")) {
     return reply.code(400).send({ error: "file content is not a recognized video format" });
   }
-  const safeName = file.filename.replace(/[^a-zA-Z0-9.-]/g, "_");
-  const { id, publicUrl } = await saveUpload(buf, safeName, file.mimetype);
+  const { id, publicUrl } = await saveUpload(buf, file.filename, file.mimetype);
   const resolvedUrl = resolvePublicUrl(req, publicUrl);
   return reply.send({ id, url: resolvedUrl });
 });
@@ -606,7 +598,7 @@ const RenderBody = z
 
 app.post("/api/render", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (req, reply) => {
   const body = RenderBody.parse(req.body);
-  const job = submitRender(body as any);
+  const job = submitRender(body);
   return reply.send({
     renderId: job.id,
     state: job.state,
@@ -626,7 +618,7 @@ app.get("/api/render/jobs/:renderId", async (req, reply) => {
 const SaveProjectBody = z.object({
   id: SafeId,
   name: z.string().min(1).max(200),
-  state: z.record(z.string(), z.string()),
+  state: z.record(z.unknown()),
 });
 
 app.get("/api/projects", async (_req, reply) => {
@@ -681,13 +673,7 @@ app.get("/api/clips", async (_req, reply) => {
 
 app.post("/api/clips/save", async (req, reply) => {
   const body = SaveClipBody.parse(req.body);
-  
-  // Provide explicit fallback strings for the optional properties
-  const saved = await saveClip({
-    ...body,
-    prompt: body.prompt || "",
-    sectionLabel: body.sectionLabel || "General"
-  } as any);
+  const saved = await saveClip(body);
   return reply.send(saved);
 });
 
@@ -717,7 +703,7 @@ app.get("/api/library/images", async (_req, reply) => {
 
 app.post("/api/library/images/save", async (req, reply) => {
   const body = SaveImageBody.parse(req.body);
-  const saved = await saveImage(body as any);
+  const saved = await saveImage(body);
   return reply.send(saved);
 });
 
@@ -744,7 +730,7 @@ app.get("/api/library/folders", async (_req, reply) => {
 
 app.post("/api/library/folders/save", async (req, reply) => {
   const body = SaveFolderBody.parse(req.body);
-  const saved = await saveFolder(body as any);
+  const saved = await saveFolder(body);
   return reply.send(saved);
 });
 
@@ -756,5 +742,6 @@ app.delete("/api/library/folders/:id", async (req, reply) => {
 });
 
 const port = process.env.PORT ? Number(process.env.PORT) : config.PORT;
-await app.listen({ port, host: "0.0.0.0" });
-app.log.info(`api listening on port ${port}`);
+app.listen({ port, host: "0.0.0.0" }).then(() => {
+  app.log.info(`api listening on port ${port}`);
+});

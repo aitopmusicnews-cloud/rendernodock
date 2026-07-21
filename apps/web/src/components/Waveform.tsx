@@ -9,19 +9,22 @@ type Props = {
   onTime?: (t: number) => void;
   onPlay?: () => void;
   onPause?: () => void;
+  onError?: (err: any) => void;
 };
 
-export function Waveform({ audioUrl, pxPerSec, onReady, onTime, onPlay, onPause }: Props) {
+export function Waveform({ audioUrl, pxPerSec, onReady, onTime, onPlay, onPause, onError }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WaveSurfer | null>(null);
   const onReadyRef = useRef(onReady);
   const onTimeRef = useRef(onTime);
   const onPlayRef = useRef(onPlay);
   const onPauseRef = useRef(onPause);
+  const onErrorRef = useRef(onError);
   onReadyRef.current = onReady;
   onTimeRef.current = onTime;
   onPlayRef.current = onPlay;
   onPauseRef.current = onPause;
+  onErrorRef.current = onError;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -56,6 +59,7 @@ export function Waveform({ audioUrl, pxPerSec, onReady, onTime, onPlay, onPause 
         console.log("WaveSurfer load aborted cleanly during component cleanup.");
       } else {
         console.error("WaveSurfer load error:", err);
+        onErrorRef.current?.(err);
       }
     });
 
