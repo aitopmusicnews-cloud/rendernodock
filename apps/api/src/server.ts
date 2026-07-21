@@ -221,7 +221,7 @@ app.setErrorHandler((err: any, req, reply) => {
   }
 
   if (err instanceof z.ZodError) {
-    return reply.code(400).send({ error: err.errors.map((e) => e.message).join("; ") });
+    return reply.code(400).send({ error: err.issues.map((e) => e.message).join("; ") });
   }
   if (err instanceof FfmpegError) {
     req.log.error({ err, stderr: err.stderr }, "ffmpeg failure");
@@ -618,7 +618,7 @@ app.get("/api/render/jobs/:renderId", async (req, reply) => {
 const SaveProjectBody = z.object({
   id: SafeId,
   name: z.string().min(1).max(200),
-  state: z.record(z.unknown()),
+  state: z.record(z.string(), z.string()),
 });
 
 app.get("/api/projects", async (_req, reply) => {
@@ -673,7 +673,13 @@ app.get("/api/clips", async (_req, reply) => {
 
 app.post("/api/clips/save", async (req, reply) => {
   const body = SaveClipBody.parse(req.body);
-  const saved = await saveClip(body);
+  
+  // Provide explicit fallback strings for the optional properties
+  const saved = await saveClip({
+    ...body,
+    prompt: body.prompt || "",
+    sectionLabel: body.sectionLabel || "General"
+  });
   return reply.send(saved);
 });
 
@@ -703,7 +709,7 @@ app.get("/api/library/images", async (_req, reply) => {
 
 app.post("/api/library/images/save", async (req, reply) => {
   const body = SaveImageBody.parse(req.body);
-  const saved = await saveImage(body);
+  const saved = await saveImage(body as any);
   return reply.send(saved);
 });
 
@@ -730,7 +736,7 @@ app.get("/api/library/folders", async (_req, reply) => {
 
 app.post("/api/library/folders/save", async (req, reply) => {
   const body = SaveFolderBody.parse(req.body);
-  const saved = await saveFolder(body);
+  const saved = await saveFolder(body as any);
   return reply.send(saved);
 });
 
@@ -742,6 +748,5 @@ app.delete("/api/library/folders/:id", async (req, reply) => {
 });
 
 const port = process.env.PORT ? Number(process.env.PORT) : config.PORT;
-app.listen({ port, host: "0.0.0.0" }).then(() => {
-  app.log.info(`api listening on port ${port}`);
-});
+await app.listen({ port, host: "0.0.0.0" });
+app.log.info(`api listening on port ${port}`);

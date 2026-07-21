@@ -2,12 +2,25 @@
   "name": "@mvs/api",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
+  "main": "dist/server.js",
   "scripts": {
-    "dev": "tsc --watch",
-    "build": "tsc",
-    "start": "node dist/index.js"
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.0",
+    "@fastify/multipart": "^9.0.0",
+    "@fastify/rate-limit": "^10.0.0",
+    "@fastify/static": "^8.0.0",
+    "@mvs/shared": "workspace:*",
+    "fastify": "^5.0.0",
+    "sharp": "^0.33.5",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
   }
 }
