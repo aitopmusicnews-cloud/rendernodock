@@ -327,7 +327,8 @@ app.post("/api/songs/upload", { config: { rateLimit: { max: 10, timeWindow: "1 m
   if (!sniffMatches(buf, "audio")) {
     return reply.code(400).send({ error: "file content is not a recognized audio format" });
   }
-  const { id, publicUrl } = await saveUpload(buf, file.filename, file.mimetype);
+  const safeName = file.filename.replace(/[^a-zA-Z0-9.-]/g, "_");
+  const { id, publicUrl } = await saveUpload(buf, safeName, file.mimetype);
   const resolvedUrl = resolvePublicUrl(req, publicUrl);
 
   await clearAnalysisError(id);
@@ -358,7 +359,8 @@ app.post("/api/images/upload", { config: { rateLimit: { max: 20, timeWindow: "1 
   if (!sniffMatches(buf, "image")) {
     return reply.code(400).send({ error: "file content is not a recognized image format" });
   }
-  const { id, publicUrl } = await saveUpload(buf, file.filename, file.mimetype);
+  const safeName = file.filename.replace(/[^a-zA-Z0-9.-]/g, "_");
+  const { id, publicUrl } = await saveUpload(buf, safeName, file.mimetype);
   const resolvedUrl = resolvePublicUrl(req, publicUrl);
   return reply.send({ id, url: resolvedUrl });
 });
@@ -375,7 +377,8 @@ app.post("/api/videos/upload", { config: { rateLimit: { max: 20, timeWindow: "1 
   if (!sniffMatches(buf, "video")) {
     return reply.code(400).send({ error: "file content is not a recognized video format" });
   }
-  const { id, publicUrl } = await saveUpload(buf, file.filename, file.mimetype);
+  const safeName = file.filename.replace(/[^a-zA-Z0-9.-]/g, "_");
+  const { id, publicUrl } = await saveUpload(buf, safeName, file.mimetype);
   const resolvedUrl = resolvePublicUrl(req, publicUrl);
   return reply.send({ id, url: resolvedUrl });
 });
