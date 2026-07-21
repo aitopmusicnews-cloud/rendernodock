@@ -1,10 +1,16 @@
 {
-  "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    
+    /* Base URL and Path Mapping */
+    "baseUrl": ".",
     "paths": {
-      "*": ["./*"],
-      "@mvs/shared": ["packages/shared/src/index.ts"]
-    }
-  },
-  "exclude": ["node_modules", "dist", "infra"]
+      "@mvs/shared": ["./packages/shared/src/index.ts"]
+    },
+
+    "strict": true,
+    "skipLibCheck": true
+  }
 }
