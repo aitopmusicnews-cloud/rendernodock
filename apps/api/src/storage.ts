@@ -94,7 +94,22 @@ export async function saveUpload(buffer: Buffer, filename: string, mimeType?: st
 }
 
 export async function readAnalysis(id: string): Promise<any> {
-  return { id, status: "ready" };
+  return {
+    id,
+    status: "ready",
+    duration: 180,
+    tempo: 120,
+    key: "C",
+    beats: [0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+    sections: [
+      { start: 0, end: 15, label: "Intro" },
+      { start: 15, end: 60, label: "Verse 1" },
+      { start: 60, end: 90, label: "Chorus" }
+    ],
+    segments: [],
+    tatums: [],
+    bars: []
+  };
 }
 
 export async function writeAnalysis(id: string, data: any): Promise<void> {}
