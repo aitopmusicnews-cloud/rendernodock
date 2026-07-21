@@ -68,7 +68,7 @@ const app = Fastify({
   maxParamLength: 500,
 });
 
-const webOrigins = config.WEB_ORIGIN.split(",").map((s) => s.trim()).filter(Boolean);
+const webOrigins = config.WEB_ORIGIN.split(",")?.map?.((s) => s.trim())?.filter?.(Boolean);
 await app.register(cors, {
   origin: (origin, cb) => {
     if (!origin) {
@@ -109,7 +109,7 @@ const possibleDirs = [
   "apps/web/dist",
   "../web/dist",
   "../../apps/web/dist"
-].filter(Boolean) as string[];
+]?.filter?.(Boolean) as string[];
 
 for (const dir of possibleDirs) {
   const p1 = resolve(dir);
@@ -226,7 +226,7 @@ app.setErrorHandler((err: any, req, reply) => {
   }
 
   if (err instanceof z.ZodError) {
-    return reply.code(400).send({ error: err.issues.map((e) => e.message).join("; ") });
+    return reply.code(400).send({ error: err.issues?.map?.((e) => e.message).join("; ") });
   }
   if (err instanceof FfmpegError) {
     req.log.error({ err, stderr: err.stderr }, "ffmpeg failure");
