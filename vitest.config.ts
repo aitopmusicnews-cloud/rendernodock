@@ -1,21 +1,19 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
 
-// happy-dom globally — the web store test needs localStorage for zustand's
-// persist middleware, and the api / shared tests don't care either way.
-// happy-dom's startup cost is small enough not to bother per-file gating.
+// https://vitejs.dev/config/
 export default defineConfig({
-  test: {
-    environment: "happy-dom",
-    setupFiles: ["./vitest.setup.ts"],
-    include: [
-      "apps/**/*.test.ts",
-      "packages/**/*.test.ts",
-    ],
-    exclude: [
-      "**/*probe*",
-      "**/node_modules/**",
-      "**/dist/**",
-      "**/.terragrunt-cache/**",
-    ],
+  plugins: [react()],
+  resolve: {
+    alias: {
+      // Allows clean imports from your workspace packages or src directory
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+  build: {
+    // Ensures build output directory is placed cleanly inside apps/web/dist
+    outDir: 'dist',
+    sourcemap: false,
   },
 });
