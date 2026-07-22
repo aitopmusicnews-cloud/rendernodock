@@ -192,8 +192,8 @@ export function VideoPreview() {
 
   return (
     <div ref={containerRef} className="preview-container" style={{ position: "relative" }}>
-      <video ref={aRef} muted playsInline style={slotStyle("a")} />
-      <video ref={bRef} muted playsInline style={slotStyle("b")} />
+      <video ref={aRef} muted playsInline crossorigin="anonymous" style={slotStyle("a")} />
+      <video ref={bRef} muted playsInline crossorigin="anonymous" style={slotStyle("b")} />
 
       {/* Loading overlay shown when current playhead is processing */}
       {playheadClip && (playheadClip.status === "generating" || playheadClip.status === "queued") && (

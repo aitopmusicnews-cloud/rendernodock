@@ -24,7 +24,7 @@ export interface JobRecord {
 }
 
 const MODAL_ENDPOINT_URL = config.MODAL_LTX_URL || 'https://cdtfullsail--mvs-ltx-video-generate.modal.run';
-const PUBLIC_API_URL = config.PUBLIC_BASE_URL || 'http://localhost:3001';
+const PUBLIC_API_URL = config.PUBLIC_BASE_URL || 'https://rendernodock.onrender.com';
 
 /**
  * File-backed Persistent Database Helpers
@@ -69,7 +69,7 @@ export async function callOpenRouter(prompt: string, systemInstruction?: string,
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${apiKey}`,
-      "HTTP-Referer": config.PUBLIC_BASE_URL || "http://localhost:3001",
+      "HTTP-Referer": config.PUBLIC_BASE_URL || "https://rendernodock.onrender.com",
       "X-Title": "Music Video Studio",
     },
     body: JSON.stringify({

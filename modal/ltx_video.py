@@ -1,7 +1,6 @@
 import io
 import os
 import uuid
-import requests
 from pathlib import Path
 import modal
 
@@ -34,14 +33,6 @@ image = (
     .env({"HF_HUB_CACHE": MODEL_DIR})
 )
 
-with image.imports():
-    import torch
-    import httpx
-    from PIL import Image
-    from diffusers import LTX2Pipeline
-    from diffusers.utils import encode_video
-    from diffusers.pipelines.ltx2.utils import DEFAULT_NEGATIVE_PROMPT
-
 @app.cls(
     image=image,
     gpu="A100-80GB",
@@ -51,6 +42,8 @@ with image.imports():
 class LTXGenerator:
     @modal.enter()
     def load_model(self):
+        import torch  # type: ignore
+        from diffusers import LTX2Pipeline  # type: ignore
         print("[LTX-2] Loading joint audio-video foundation weights...")
         self.pipe = LTX2Pipeline.from_pretrained(
             "diffusers/LTX-2.3-Diffusers",
@@ -59,6 +52,13 @@ class LTXGenerator:
 
     @modal.method()
     def generate_clip(self, prompt: str, duration_sec: float, init_image_url: str = None) -> str:
+        import torch  # type: ignore
+        import httpx  # type: ignore
+        from PIL import Image  # type: ignore
+        from diffusers import LTX2Pipeline  # type: ignore
+        from diffusers.utils import encode_video  # type: ignore
+        from diffusers.pipelines.ltx2.utils import DEFAULT_NEGATIVE_PROMPT  # type: ignore
+
         fps = 24.0
         num_frames = int(duration_sec * fps)
         num_frames = ((num_frames - 1) // 8) * 8 + 1
@@ -102,7 +102,7 @@ class LTXGenerator:
             audio_sample_rate=self.pipe.vocoder.config.output_sampling_rate,
             output_path=str(filepath),
         )
-        
+
         print(f"[LTX-2] Rendered output saved to: {filename}")
         output_volume.commit()
         return filename
@@ -111,35 +111,35 @@ class LTXGenerator:
 @app.function(image=image, volumes={OUTPUT_DIR: output_volume})
 @modal.fastapi_endpoint(method="POST")
 def generate(payload: dict):
+    import httpx  # type: ignore
     prompt = payload.get("prompt", "")
     duration = float(payload.get("duration", 4.0))
     init_image_url = payload.get("init_image_url", None)
     webhook_url = payload.get("webhook_url", None)
     job_id = payload.get("job_id", None)
-    
+
     gen = LTXGenerator()
-    
+
     try:
         # Run the computation
         filename = gen.generate_clip.remote(prompt, duration, init_image_url)
         video_url = f"https://cdtfullsail--mvs-ltx-video-get-file.modal.run?filename={filename}"
-        
+
         # Trigger the webhook callback back to Node.js if provided
         if webhook_url:
             print(f"[Webhook] Dispatching success callback to: {webhook_url}")
-            import httpx
             httpx.post(webhook_url, json={
                 "status": "completed",
                 "job_id": job_id,
                 "video_url": video_url
             }, timeout=10.0)
-            
+
         return {"status": "processing_triggered", "video_url": video_url}
-        
+
     except Exception as e:
         print(f"[Modal Error] Generation failed: {str(e)}")
         if webhook_url:
-            import httpx
+            import httpx  # type: ignore
             try:
                 httpx.post(webhook_url, json={
                     "status": "failed",
@@ -153,7 +153,7 @@ def generate(payload: dict):
 @app.function(image=image, volumes={OUTPUT_DIR: output_volume})
 @modal.fastapi_endpoint(method="GET")
 def get_file(filename: str):
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse  # type: ignore
     output_volume.reload()
     filepath = Path(OUTPUT_DIR) / filename
     if filepath.exists():
