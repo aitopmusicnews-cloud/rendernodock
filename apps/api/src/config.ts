@@ -18,30 +18,13 @@ const Env = z.object({
   MODAL_LIPSYNC_URL: optionalUrl.optional(),
   MODAL_FILE_RESOLVER_URL: optionalUrl.optional(),
   PORT: z.coerce.number().default(3001),
-  PUBLIC_BASE_URL: z.string().url().default("http://localhost:3001"),
-  // Comma-separated list of allowed CORS origins (or a single URL).
-  WEB_ORIGIN: z
-    .string()
-    .default("http://localhost:5173")
-    .refine(
-      (v) =>
-        v
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .every((s) => /^https?:\/\/[^,\s]+$/.test(s)),
-      "WEB_ORIGIN must be a URL or comma-separated list of URLs"
-    ),
-  STORAGE_DIR: z.string().default("./storage"),
-  STORAGE_BACKEND: z.enum(["local", "s3"]).default("local"),
+  PUBLIC_BASE_URL: z.string().url().default("https://onrender.com"),
+  WEB_ORIGIN: z.string().default("https://onrender.com"),
+  STORAGE_DIR: z.string().default("s3://rendernodock-storage-052080186671-us-east-1-an/renders/"),
+  STORAGE_BACKEND: z.enum(["local", "s3"]).default("s3"),
   S3_BUCKET: optionalNonEmpty.optional(),
   S3_REGION: optionalNonEmpty.optional(),
-  /** Override the public URL base for S3 objects (e.g. a CloudFront domain).
-   * When unset, virtual-hosted-style S3 URLs are used. */
   S3_PUBLIC_URL_BASE: optionalUrl.optional(),
-  /** Directory holding the built SPA (apps/web/dist) to serve from `/`.
-   * In the production Docker image this is set to /app/web; locally it can
-   * stay unset and Vite handles the SPA in dev. */
   WEB_DIST_DIR: optionalNonEmpty.optional(),
 });
 
@@ -51,35 +34,27 @@ if (!parsed.success) {
   for (const issue of parsed.error.issues) {
     console.error(`  ${issue.path.join(".")}: ${issue.message}`);
   }
-  console.error("\ncopy .env.example to .env at the repo root and fill in values.");
+  console.error("\nPlease review environment setup properties in your Render dashboard config settings.");
   process.exit(1);
 }
 
 export const config = parsed.data;
 
-// Logs a warning if your LTX Video variable is missing
+// Health Checks & Boot Diagnostics
 if (!config.MODAL_LTX_URL) {
-  console.log(
-    "INFO: MODAL_LTX_URL is not set. Timeline requests for LTX Video will fall back."
-  );
+  console.log("INFO: MODAL_LTX_URL is missing. Video processing generation paths are offline.");
 }
-
 if (!config.MODAL_AUDIO_URL) {
-  console.log(
-    "INFO: MODAL_AUDIO_URL is not set. Song uploads will analyze nothing. " +
-      "Deploy modal/audio_analysis.py and put the URL in .env."
-  );
+  console.log("INFO: MODAL_AUDIO_URL is missing. Music analysis features are offline.");
 }
-
-// Environment logging for the new Media Suite endpoints
 if (!config.MODAL_MEDIA_SUITE_URL) {
-  console.log("INFO: MODAL_MEDIA_SUITE_URL is missing. Text-to-Image paths are disabled.");
+  console.log("INFO: MODAL_MEDIA_SUITE_URL is missing. Character creation pipeline is offline.");
 }
 if (!config.MODAL_LIPSYNC_URL) {
-  console.log("INFO: MODAL_LIPSYNC_URL is missing. Character Lip Sync features are disabled.");
+  console.log("INFO: MODAL_LIPSYNC_URL is missing. Lip-Sync animation features are offline.");
 }
 if (!config.MODAL_FILE_RESOLVER_URL) {
-  console.log("INFO: MODAL_FILE_RESOLVER_URL is missing. Cloud media tracking is disabled.");
+  console.log("INFO: MODAL_FILE_RESOLVER_URL is missing. Media stream tracking is offline.");
 }
 
 if (config.STORAGE_BACKEND === "s3") {
@@ -87,8 +62,6 @@ if (config.STORAGE_BACKEND === "s3") {
     console.error("STORAGE_BACKEND=s3 requires S3_BUCKET and S3_REGION");
     process.exit(1);
   }
-} else {
-  console.log("STORAGE_BACKEND=local — uploads stored on container disk only (ephemeral).");
 }
 
 export type Config = z.infer<typeof Env>;
