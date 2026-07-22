@@ -13,36 +13,20 @@ const SOURCES: Array<{ value: Clip["source"]; label: string; desc: string }> = [
   { value: "generated", label: "Text-to-Image ──> Video", desc: "Generate seed frame using SDXL ──> animate with LTX-Video" },
   { value: "lipSync", label: "Character Lip Sync Studio", desc: "Animate avatar mouth synced to vocal stems on Modal" },
   { value: "continue", label: "Continue from previous clip", desc: "Seamless generation utilizing the last frame of the previous clip" },
-  { value: "archetype", label: "Seed from lookbook image", desc: "Select an archetype lookbook image to initialize the motion sequence" },
-  { value: "library", label: "Reapply from clip library", desc: "Reuse previously rendered assets" },
-  { value: "aleph", label: "Restyle existing clip", desc: "Apply image style transfer to render" },
 ];
 
-// UPDATED: Models configured for image-to-video paths highlighting LTX-Video on Modal
+// CLEANED: Only lists the actual LTX engine running on your Modal A100 GPU
 const IMAGE_TO_VIDEO_MODELS: Array<{ value: any; label: string; desc: string }> = [
-  { value: "ltx-video", label: "⚡ LTX Video (Modal)", desc: "High-motion native generation · 768x512 · 24fps" },
-  { value: "openrouter_flash", label: "OpenRouter Flash", desc: "Fast text reference rendering · Gemini 2.5 Flash" },
-  { value: "local_wan21", label: "Wan v2.1 (Local GPU)", desc: "Local workstation deployment pipeline" },
-  { value: "openrouter_ultra", label: "OpenRouter Ultra", desc: "High-fidelity static rendering · Gemini 2.5 Pro" },
-  { value: "seedance2", label: "SeedDance 2", desc: "Fallback alternative video engine" },
+  { value: "ltx-video", label: "⚡ LTX Video (Modal Cloud)", desc: "High-motion native generation · 768x512 · 24fps" },
 ];
 
-// UPDATED: Models configured for text-to-video paths highlighting LTX-Video on Modal
+// CLEANED: Matches your text-to-video workflow perfectly
 const TEXT_TO_VIDEO_MODELS: Array<{ value: any; label: string; desc: string }> = [
-  { value: "ltx-video", label: "⚡ LTX Video (Modal)", desc: "High-motion native generation · 768x512 · 24fps" },
-  { value: "openrouter_flash", label: "OpenRouter Flash", desc: "Fast text reference rendering · Gemini 2.5 Flash" },
-  { value: "local_wan21", label: "Wan v2.1 (Local GPU)", desc: "Local workstation deployment pipeline" },
-  { value: "openrouter_ultra", label: "OpenRouter Ultra", desc: "High-fidelity static rendering · Gemini 2.5 Pro" },
-];
-
-const ALEPH_MODELS: Array<{ value: GenerationModel; label: string; desc: string }> = [
-  { value: "openrouter_aleph", label: "OpenRouter Aleph", desc: "primary restyle path" },
-  { value: "seedance2", label: "SeedDance 2", desc: "alt restyle" },
+  { value: "ltx-video", label: "⚡ LTX Video (Modal Cloud)", desc: "High-motion native generation · 768x512 · 24fps" },
 ];
 
 function modelsForSource(source: Clip["source"]): typeof IMAGE_TO_VIDEO_MODELS {
-  if (source === "textToVideo") return TEXT_TO_VIDEO_MODELS;
-  if (source === "aleph") return ALEPH_MODELS;
+  // Everything routes to your native Modal LTX engine now
   return IMAGE_TO_VIDEO_MODELS;
 }
 
