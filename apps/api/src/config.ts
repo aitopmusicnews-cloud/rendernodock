@@ -11,12 +11,12 @@ const optionalNonEmpty = z
   .pipe(z.string().min(1).optional());
 
 const Env = z.object({
-  FAL_API_SECRET: optionalNonEmpty.optional(),
-  OPENROUTER_API_KEY: optionalNonEmpty.optional(),
-  OPENROUTER_MODEL: optionalNonEmpty.optional(),
   LOCAL_INFERENCE_URL: optionalUrl.optional(),
   MODAL_AUDIO_URL: optionalUrl.optional(),
-  MODAL_LTX_URL: optionalUrl.optional(), // ADDED: Registers LTX-Video variable
+  MODAL_LTX_URL: optionalUrl.optional(), 
+  MODAL_MEDIA_SUITE_URL: optionalUrl.optional(),
+  MODAL_LIPSYNC_URL: optionalUrl.optional(),
+  MODAL_FILE_RESOLVER_URL: optionalUrl.optional(),
   PORT: z.coerce.number().default(3001),
   PUBLIC_BASE_URL: z.string().url().default("http://localhost:3001"),
   // Comma-separated list of allowed CORS origins (or a single URL).
@@ -57,7 +57,7 @@ if (!parsed.success) {
 
 export const config = parsed.data;
 
-// ADDED: Logs a warning if your LTX Video variable is missing
+// Logs a warning if your LTX Video variable is missing
 if (!config.MODAL_LTX_URL) {
   console.log(
     "INFO: MODAL_LTX_URL is not set. Timeline requests for LTX Video will fall back."
@@ -70,6 +70,18 @@ if (!config.MODAL_AUDIO_URL) {
       "Deploy modal/audio_analysis.py and put the URL in .env."
   );
 }
+
+// Environment logging for the new Media Suite endpoints
+if (!config.MODAL_MEDIA_SUITE_URL) {
+  console.log("INFO: MODAL_MEDIA_SUITE_URL is missing. Text-to-Image paths are disabled.");
+}
+if (!config.MODAL_LIPSYNC_URL) {
+  console.log("INFO: MODAL_LIPSYNC_URL is missing. Character Lip Sync features are disabled.");
+}
+if (!config.MODAL_FILE_RESOLVER_URL) {
+  console.log("INFO: MODAL_FILE_RESOLVER_URL is missing. Cloud media tracking is disabled.");
+}
+
 if (config.STORAGE_BACKEND === "s3") {
   if (!config.S3_BUCKET || !config.S3_REGION) {
     console.error("STORAGE_BACKEND=s3 requires S3_BUCKET and S3_REGION");
