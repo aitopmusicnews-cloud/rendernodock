@@ -1,66 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>S3 Video Streamer</title>
-  <style>
-    /* Basic modern styling for centered player */
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f4f6f8;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      margin: 0;
-      padding: 20px;
-    }
-
-    .video-container {
-      background: #ffffff;
-      padding: 16px;
-      border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-      max-width: 800px;
-      width: 100%;
-    }
-
-    video {
-      width: 100%;
-      height: auto;
-      border-radius: 4px;
-      display: block;
-    }
-
-    h1 {
-      font-size: 1.25rem;
-      color: #333333;
-      margin-top: 0;
-      margin-bottom: 12px;
-    }
-  </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Music Video Studio</title>
+  <link rel="stylesheet" href="/src/styles/app.css" />
 </head>
 <body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
 
-  <div class="video-container">
-    <h1>S3 Video Player</h1>
-
-    <!-- 
-      Key Attributes:
-      - crossorigin="anonymous": Requests video with CORS header validation.
-      - controls: Enables play, pause, volume, and seeking controls.
-      - preload="metadata": Pre-loads duration and dimensions without downloading full video upfront.
-    -->
-    <video controls preload="metadata" crossorigin="anonymous">
-      <source 
-        src="https://rendernodock-storage-052080186671-us-east-1-an.s3.us-east-1.amazonaws.com/18b2140f8d29573a.mp4" 
-        type="video/mp4"
-      >
-      Your browser does not support HTML5 video playback.
-    </video>
-  </div>
 
 </body>
 </html>
