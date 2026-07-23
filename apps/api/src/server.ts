@@ -487,25 +487,41 @@ const CreateAvatarBody = z.object({
 });
 
 app.get("/api/avatars", async (req, reply) => {
-  // FIXED: Returns a clean empty array instead of calling the missing function
   return reply.send([]);
 });
 
-app.post("/api/avatars", async (req, reply) => {
+app.post("/api/avatars/create", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
+  const body = CreateAvatarBody.parse(req.body);
   try {
-    // FIXED: Remapped this second instance to use your active Modal SDXL image frame generator
-    const result = await generateCharacterFrame(req.body as any);
-    return reply.send(result);
+    const result = await generateCharacterFrame({
+      model: "gen4_image",
+      promptText: `Generate a character avatar from: ${body.name}`,
+      ratio: "1:1",
+    } as any);
+    return reply.send({
+      avatarId: result.id,
+      status: "READY",
+      failureReason: undefined,
+    });
   } catch (error: any) {
     return reply.code(500).send({ error: error.message });
   }
 });
 
-app.post("/api/avatars", async (req, reply) => {
+app.get("/api/avatars/:id", async (req, reply) => {
+  const params = z.object({ id: SafeId }).parse(req.params);
   try {
-    // FIXED: Swapped createAvatar for your clean, native Modal SDXL image frame generator
-    const result = await generateCharacterFrame(req.body as any);
-    return reply.send(result);
+    const job = await readJobFromDisk(params.id);
+    if (!job) {
+      return reply.code(404).send({ error: "Avatar not found" });
+    }
+    return reply.send({
+      id: params.id,
+      name: "Avatar",
+      status: job.status === "completed" ? "READY" : "PROCESSING",
+      imageUri: job.status === "completed" ? job.video_url : undefined,
+      createdAt: Date.now(),
+    });
   } catch (error: any) {
     return reply.code(500).send({ error: error.message });
   }
@@ -527,7 +543,6 @@ app.get("/api/tasks/:id", async (req, reply) => {
 });
 
 app.delete("/api/tasks/:id", async (req, reply) => {
-  // FIXED: Returns a clean success message instead of calling the missing function
   return reply.send({ success: true, message: "Task references cleared from workspace." });
 });
 
@@ -565,7 +580,7 @@ const VocalStemBody = z.object({
   audioUrl: urlOrPath,
 });
 
-app.post("/api/songs/vocal-stem", async (req, reply) => {
+app.post("/api/audio/vocal-stem", async (req, reply) => {
   const body = VocalStemBody.parse(req.body);
   const result = await analyzeVocalTrack(body.audioUrl);
   return reply.send(result);
@@ -601,6 +616,16 @@ const RenderBody = z
     message: "clip extends past project duration",
   });
 
+app.post("/api/renders/submit", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (req, reply) => {
+  const body = RenderBody.parse(req.body);
+  const job = submitRender(body);
+  return reply.send({
+    renderId: job.id,
+    state: job.state,
+    queuePosition: job.queuePosition,
+  });
+});
+
 app.post("/api/render", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (req, reply) => {
   const body = RenderBody.parse(req.body);
   const job = submitRender(body);
@@ -609,6 +634,13 @@ app.post("/api/render", { config: { rateLimit: { max: 5, timeWindow: "1 minute" 
     state: job.state,
     queuePosition: job.queuePosition,
   });
+});
+
+app.get("/api/renders/:renderId", async (req, reply) => {
+  const params = z.object({ renderId: SafeId }).parse(req.params);
+  const job = getRenderJob(params.renderId);
+  if (!job) return reply.code(404).send({ error: "render job not found" });
+  return reply.send(job);
 });
 
 app.get("/api/render/jobs/:renderId", async (req, reply) => {
@@ -624,16 +656,23 @@ const SaveProjectBody = z.object({
   id: SafeId,
   name: z.string().min(1).max(200),
   state: z.record(z.unknown()),
+  thumbnailUrl: z.string().optional(),
 });
 
 app.get("/api/projects", async (_req, reply) => {
   const projects = await listProjects();
-  return reply.send({ projects });
+  return reply.send(projects);
+});
+
+app.post("/api/projects", async (req, reply) => {
+  const body = SaveProjectBody.parse(req.body);
+  const meta = await saveProject(body.id, body.name, body.state, body.thumbnailUrl);
+  return reply.send(meta);
 });
 
 app.post("/api/projects/save", async (req, reply) => {
   const body = SaveProjectBody.parse(req.body);
-  const meta = await saveProject(body.id, body.name, body.state);
+  const meta = await saveProject(body.id, body.name, body.state, body.thumbnailUrl);
   return reply.send(meta);
 });
 
@@ -651,6 +690,11 @@ app.delete("/api/projects/:id", async (req, reply) => {
   return reply.send({ ok: true });
 });
 
+app.get("/api/renders", async (_req, reply) => {
+  const renders = await listRenders();
+  return reply.send(renders);
+});
+
 app.get("/api/library/renders", async (_req, reply) => {
   const renders = await listRenders();
   return reply.send({ renders });
@@ -666,6 +710,7 @@ const SaveClipBody = z.object({
   prompt: z.string().nullable(),
   duration: z.number().positive(),
   sectionLabel: z.string().nullable(),
+  savedAt: z.string().optional(),
   folderId: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
   generationTaskId: z.string().nullable().optional(),
@@ -673,7 +718,13 @@ const SaveClipBody = z.object({
 
 app.get("/api/clips", async (_req, reply) => {
   const clips = await listClips();
-  return reply.send({ clips });
+  return reply.send(clips);
+});
+
+app.post("/api/clips", async (req, reply) => {
+  const body = SaveClipBody.parse(req.body);
+  const saved = await saveClip(body);
+  return reply.send(saved);
 });
 
 app.post("/api/clips/save", async (req, reply) => {
@@ -698,7 +749,25 @@ const SaveImageBody = z.object({
   source: z.string(),
   prompt: z.string().nullable(),
   model: z.string().nullable(),
+  savedAt: z.string().optional(),
   folderId: z.string().nullable().optional(),
+});
+
+app.get("/api/images/library", async (_req, reply) => {
+  const images = await listImages();
+  return reply.send(images);
+});
+
+app.post("/api/images/library", async (req, reply) => {
+  const body = SaveImageBody.parse(req.body);
+  const saved = await saveImage(body);
+  return reply.send(saved);
+});
+
+app.post("/api/library/images/save", async (req, reply) => {
+  const body = SaveImageBody.parse(req.body);
+  const saved = await saveImage(body);
+  return reply.send(saved);
 });
 
 app.get("/api/library/images", async (_req, reply) => {
@@ -706,10 +775,11 @@ app.get("/api/library/images", async (_req, reply) => {
   return reply.send({ images });
 });
 
-app.post("/api/library/images/save", async (req, reply) => {
-  const body = SaveImageBody.parse(req.body);
-  const saved = await saveImage(body);
-  return reply.send(saved);
+app.delete("/api/images/library/:id", async (req, reply) => {
+  const params = z.object({ id: SafeId }).parse(req.params);
+  const deleted = await deleteImage(params.id);
+  if (!deleted) return reply.code(404).send({ error: "not found" });
+  return reply.send({ ok: true });
 });
 
 app.delete("/api/library/images/:id", async (req, reply) => {
@@ -726,11 +796,18 @@ const SaveFolderBody = z.object({
   name: z.string().min(1).max(200),
   parentId: z.string().nullable(),
   type: z.enum(["clips", "images"]),
+  createdAt: z.string().optional(),
 });
 
 app.get("/api/library/folders", async (_req, reply) => {
   const folders = await listFolders();
-  return reply.send({ folders });
+  return reply.send(folders);
+});
+
+app.post("/api/library/folders", async (req, reply) => {
+  const body = SaveFolderBody.parse(req.body);
+  const saved = await saveFolder(body);
+  return reply.send(saved);
 });
 
 app.post("/api/library/folders/save", async (req, reply) => {
