@@ -102,8 +102,9 @@ export interface AvatarSummary {
   id: string;
   name: string;
   status: "PROCESSING" | "READY" | "FAILED" | "PAUSED" | "UNKNOWN" | string;
-  imageUri: string;
-  createdAt: string;
+  imageUri: string | null;
+  createdAt: number;
+  failureReason?: string;
 }
 
 export interface SavedClip {
