@@ -100,7 +100,7 @@ export function LeftRail() {
   }, [character, nameInput, setAvatarStatus, setAvatarName, setAvatarId]);
 
   const onPickExisting = useCallback((a: AvatarSummary) => {
-    pickAvatar(a.id, a.name, a.imageUri);
+    pickAvatar(a.id, a.name, a.imageUri ?? null);
     setMode("idle");
     setNameInput("");
   }, [pickAvatar]);
