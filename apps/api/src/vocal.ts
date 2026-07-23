@@ -1,57 +1,37 @@
-import { createHash } from "node:crypto";
-import { encodeTaskId } from "./modalAI.js";
-import { readVocalStemUrl, writeVocalStemUrl } from "./storage.js";
-import { pollUntil } from "./poll.js";
+import { config } from "./config.js";
+import { encodeTaskId, type ModalTask } from "./modalAI.js";
 
-// Process-local dedup — concurrent requests for the same audio share one
-// Runway task. Does not deduplicate across processes/containers.
-const inflight = new Map<string, Promise<{ url: string; cached: boolean }>>();
+interface ModalAudioResponse {
+  duration: number;
+  bpm: number;
+  key: string;
+  beats: number[];
+  downbeats: number[];
+  onsets: number[];
+  rms_curve: number[];
+  sections: Array<{ start: number; end: number; label: string }>;
+}
 
 /**
- * Cache key for the vocal stem. Derived from the audio URL itself so:
- *   - the full-song case (audioUrl = stable song URL) caches per song;
- *   - the per-region case (audioUrl = content-addressed slice URL) caches
- *     per region content. Boundary drags re-slice → new URL → new key,
- *     so we don't reuse a stale stem from a previous region.
+ * Core Vocal Track Analyzer connecting directly to Modal cloud workspace
  */
-function cacheKeyFor(audioUrl: string): string {
-  return createHash("sha256").update(audioUrl).digest("hex").slice(0, 16);
-}
+export async function analyzeVocalTrack(audioUrl: string): Promise<ModalTask> {
+  const jobId = `audio_${Date.now()}`;
+  
+  const response = await fetch(config.MODAL_AUDIO_URL || 'https://modal.run', {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: audioUrl, job_id: jobId })
+  });
 
-export async function ensureVocalStem(
-  audioUrl: string
-): Promise<{ url: string; cached: boolean }> {
-  const key = cacheKeyFor(audioUrl);
-  const cached = await readVocalStemUrl(key);
-  if (cached) return { url: cached, cached: true };
-
-  const existing = inflight.get(key);
-  if (existing) return existing;
-
-  const promise = (async () => {
-    const task = await voiceIsolation({ audioUri: audioUrl });
-    const result = await awaitTask(task.id);
-    if (result.status !== "SUCCEEDED" || !result.output?.[0]) {
-      const failure = "failure" in result ? String(result.failure) : "no output URL";
-      throw new Error(`voice isolation ${result.status}: ${failure}`);
-    }
-    const url = result.output[0];
-    await writeVocalStemUrl(key, url);
-    return { url, cached: false };
-  })();
-
-  inflight.set(key, promise);
-  try {
-    return await promise;
-  } finally {
-    inflight.delete(key);
+  if (!response.ok) {
+    throw new Error(`Modal audio analyzer rejected track payload: ${response.statusText}`);
   }
-}
 
-async function awaitTask(id: string, timeoutMs = 5 * 60 * 1000) {
-  return pollUntil(
-    () => getTask(id),
-    (t) => t.status === "SUCCEEDED" || t.status === "FAILED" || t.status === "CANCELLED",
-    { timeoutMs, label: "voice-isolation task" }
-  );
+  // FIXED: Cast explicitly to the type-safe contract to clear strict compiler flags
+  const result = (await response.json()) as ModalAudioResponse;
+
+  console.log(`[Audio Pipeline Success] Analyzed ${result.duration}s track. Key: ${result.key}, BPM: ${result.bpm}`);
+
+  return { id: encodeTaskId({ source: "modal", id: jobId }) };
 }
