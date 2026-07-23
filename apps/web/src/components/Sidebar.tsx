@@ -111,7 +111,6 @@ export function Sidebar() {
       clipId: clip.id,
       source: clip.source,
       seedImageUrl: seed,
-      inputVideoUrl: clip.source === "aleph" ? clip.videoUrl : undefined,
       songId: clip.source === "lipSync" ? songId ?? undefined : undefined,
       audioUrl: clip.source === "lipSync" ? audioUrl ?? undefined : undefined,
       avatarId: clip.source === "lipSync" ? avatarId ?? undefined : undefined,

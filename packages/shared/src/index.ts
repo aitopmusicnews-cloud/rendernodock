@@ -23,7 +23,7 @@ export const Clip = z.object({
   id: z.string(),
   start: z.number(),
   end: z.number(),
-  source: z.enum(["continue", "archetype", "generated", "textToVideo", "library", "lipSync", "upload"]),
+  source: z.enum(["continue", "archetype", "generated", "textToVideo", "library", "lipSync", "upload", "aleph"]),
   status: z.enum(["empty", "queued", "generating", "ready", "failed"]),
   prompt: z.string().optional(),
   videoUrl: z.string().optional(),
@@ -88,6 +88,15 @@ export const LipSyncRequest = z.object({
   videoUrl: z.string().optional(),
 });
 export type LipSyncRequest = z.infer<typeof LipSyncRequest>;
+
+export const VideoToVideoRequest = z.object({
+  model: z.string(),
+  videoUri: z.string(),
+  promptText: z.string(),
+  ratio: z.string(),
+  duration: z.number(),
+});
+export type VideoToVideoRequest = z.infer<typeof VideoToVideoRequest>;
 
 export interface AvatarSummary {
   id: string;
