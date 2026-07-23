@@ -249,16 +249,25 @@ export async function saveProject(id: string, name: string, state: any, thumbnai
   }));
 }
 
+export async function saveProjectToServer(id: string, name: string, state: any, thumbnailUrl?: string): Promise<{ id: string }> {
+  return saveProject(id, name, state, thumbnailUrl);
+}
+
 // Clip API
 export async function listSavedClips(): Promise<SavedClip[]> {
   return jsonOrThrow(await fetch("/api/clips"));
 }
 
-export async function saveClipToServer(clip: SavedClip): Promise<SavedClip> {
+export async function saveClipToServer(clip: Partial<SavedClip>): Promise<SavedClip> {
+  const now = new Date().toISOString();
+  const body = {
+    ...clip,
+    savedAt: clip.savedAt || now,
+  };
   return jsonOrThrow(await fetch("/api/clips", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(clip),
+    body: JSON.stringify(body),
   }));
 }
 
@@ -275,11 +284,16 @@ export async function listSavedImages(): Promise<SavedImage[]> {
   return jsonOrThrow(await fetch("/api/images/library"));
 }
 
-export async function saveImageToLibrary(image: SavedImage): Promise<SavedImage> {
+export async function saveImageToLibrary(image: Partial<SavedImage>): Promise<SavedImage> {
+  const now = new Date().toISOString();
+  const body = {
+    ...image,
+    savedAt: image.savedAt || now,
+  };
   return jsonOrThrow(await fetch("/api/images/library", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(image),
+    body: JSON.stringify(body),
   }));
 }
 
@@ -296,11 +310,16 @@ export async function listLibraryFolders(): Promise<LibraryFolder[]> {
   return jsonOrThrow(await fetch("/api/library/folders"));
 }
 
-export async function saveLibraryFolder(folder: LibraryFolder): Promise<LibraryFolder> {
+export async function saveLibraryFolder(folder: Partial<LibraryFolder>): Promise<LibraryFolder> {
+  const now = new Date().toISOString();
+  const body = {
+    ...folder,
+    createdAt: folder.createdAt || now,
+  };
   return jsonOrThrow(await fetch("/api/library/folders", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(folder),
+    body: JSON.stringify(body),
   }));
 }
 
@@ -315,4 +334,41 @@ export async function deleteLibraryFolder(id: string): Promise<void> {
 // Renders API
 export async function listRenders(): Promise<RenderEntry[]> {
   return jsonOrThrow(await fetch("/api/renders"));
+}
+
+export async function renderTimeline(
+  req: RenderRequest,
+  options?: { onUpdate?: (job: RenderJob) => void }
+): Promise<{ url: string }> {
+  // Submit the render job
+  const submitRes = await jsonOrThrow<RenderSubmitResponse>(await fetch("/api/renders/submit", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  }));
+
+  const renderId = submitRes.renderId;
+  const pollInterval = 2000;
+  const maxWait = 3600_000; // 1 hour
+  const start = Date.now();
+
+  // Poll until complete
+  while (Date.now() - start < maxWait) {
+    const jobRes = await jsonOrThrow<RenderJob>(await fetch(`/api/renders/${renderId}`));
+    
+    if (options?.onUpdate) {
+      options.onUpdate(jobRes);
+    }
+
+    if (jobRes.state === "succeeded" && jobRes.url) {
+      return { url: jobRes.url };
+    }
+    if (jobRes.state === "failed") {
+      throw new Error(jobRes.error ?? "render failed");
+    }
+
+    await new Promise((r) => setTimeout(r, pollInterval));
+  }
+
+  throw new Error("render timed out");
 }
