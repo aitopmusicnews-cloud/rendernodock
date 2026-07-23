@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { voiceIsolation, getTask } from "./openrouter.js";
+import { encodeTaskId } from "./modalAI.js";
 import { readVocalStemUrl, writeVocalStemUrl } from "./storage.js";
 import { pollUntil } from "./poll.js";
 
