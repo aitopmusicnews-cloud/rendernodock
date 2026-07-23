@@ -76,12 +76,13 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<ModalTask>
 
   const webhookUrl = `${PUBLIC_API_URL}/api/modal/webhook`;
   
-  const response = await fetch(config.MODAL_LTX_URL || 'https://cdtfullsail--mvs-ltx-video-generate.modal.run', {
+  const response = await fetch(config.MODAL_LTX_URL || 'https://modal.run', {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       prompt: promptToUse,
-      image_url: req.imageUrl || undefined,
+      // FIXED: Maps your app's actual promptImage property to the backend payload
+      image_url: req.promptImage || undefined,
       job_id: jobId,
       webhook_url: webhookUrl
     })
@@ -121,11 +122,12 @@ export async function generateCharacterFrame(req: TextToImageRequest): Promise<{
 export async function animateLipSync(req: LipSyncRequest): Promise<ModalTask> {
   const jobId = `sync_${Date.now()}`;
   
-  const response = await fetch(config.MODAL_LIPSYNC_URL || 'https://cdtfullsail--mvs-media-suite-lip-sync.modal.run', {
+  const response = await fetch(config.MODAL_LIPSYNC_URL || 'https://modal.run', {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      audio_url: req.audioUrl,
+      // FIXED: Swapped audioUrl to audioUri to match your frontend type
+      audio_url: req.audioUri,
       video_url: req.videoUrl,
       job_id: jobId
     })
