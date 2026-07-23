@@ -23,7 +23,7 @@ export const Clip = z.object({
   id: z.string(),
   start: z.number(),
   end: z.number(),
-  source: z.enum(["continue", "archetype", "generated", "textToVideo", "library", "lipSync", "aleph", "upload"]),
+  source: z.enum(["continue", "archetype", "generated", "textToVideo", "library", "lipSync", "upload"]),
   status: z.enum(["empty", "queued", "generating", "ready", "failed"]),
   prompt: z.string().optional(),
   videoUrl: z.string().optional(),
@@ -74,26 +74,10 @@ export const TextToVideoRequest = z.object({
 });
 export type TextToVideoRequest = z.infer<typeof TextToVideoRequest>;
 
-export const VideoToVideoRequest = z.object({
-  model: z.string(),
-  videoUri: z.string(),
-  promptText: z.string().optional(),
-  ratio: z.string().optional(),
-  references: z.array(z.string()).optional(),
-});
-export type VideoToVideoRequest = z.infer<typeof VideoToVideoRequest>;
-
 export const TextToImageRequest = z.object({
   model: z.string(),
   promptText: z.string(),
   ratio: z.string(),
-  referenceImages: z.array(z.object({
-    uri: z.string(),
-    tag: z.string().optional(),
-    subject: z.string().optional(),
-  })).optional(),
-  quality: z.string().optional(),
-  outputCount: z.number().optional(),
 });
 export type TextToImageRequest = z.infer<typeof TextToImageRequest>;
 
@@ -104,11 +88,6 @@ export const LipSyncRequest = z.object({
   videoUrl: z.string().optional(),
 });
 export type LipSyncRequest = z.infer<typeof LipSyncRequest>;
-
-export const VoiceIsolationRequest = z.object({
-  audioUri: z.string(),
-});
-export type VoiceIsolationRequest = z.infer<typeof VoiceIsolationRequest>;
 
 export interface AvatarSummary {
   id: string;
@@ -184,25 +163,8 @@ export interface Task {
   errorCode?: string;
 }
 
-export type GenerationModel =
-  | "openrouter_ultra"
-  | "openrouter_flash"
-  | "local_wan21"
-  | "seedance2"
-  | "veo3.1"
-  | "veo3.1_fast"
-  | "openrouter_aleph"
-  | string;
-
-export type TextToImageModel =
-  | "openrouter_image_ultra"
-  | "openrouter_image_flash"
-  | "local_wan21_image"
-  | "gpt_image_2"
-  | "gemini_image3_pro"
-  | "gemini_2.5_flash"
-  | string;
-
+export type GenerationModel = "ltx-video" | string;
+export type TextToImageModel = "sdxl-modal" | string;
 export type TextToImageRatio = string;
 
 export function getErrorMessage(err: unknown): string {
@@ -212,25 +174,14 @@ export function getErrorMessage(err: unknown): string {
 }
 
 export function modelSupportsBridge(model: string): boolean {
-  return ["seedance2", "veo3.1", "veo3.1_fast"].includes(model);
+  return false;
 }
 
 export function formatModelName(model?: string | null): string {
   if (!model) return "";
   const mapping: Record<string, string> = {
-    "openrouter_ultra": "OpenRouter Ultra (Gemini 2.5 Pro)",
-    "openrouter_flash": "OpenRouter Flash (Gemini 2.5 Flash)",
-    "local_wan21": "Wan v2.1 (Local Self-Hosted)",
-    "seedance2": "SeedDance 2",
-    "veo3.1": "Veo 3.1",
-    "veo3.1_fast": "Veo 3.1 Fast",
-    "openrouter_aleph": "OpenRouter Aleph",
-    "openrouter_image_ultra": "OpenRouter Image Ultra",
-    "openrouter_image_flash": "OpenRouter Image Flash",
-    "local_wan21_image": "Wan v2.1 Image (Local)",
-    "gpt_image_2": "GPT Image 2",
-    "gemini_image3_pro": "Imagen 3 Pro",
-    "gemini_2.5_flash": "Gemini Flash",
+    "ltx-video": "⚡ LTX Video (Modal Cloud)",
+    "sdxl-modal": "⚡ Stable Diffusion XL (Modal Cloud)",
   };
   return mapping[model] ?? model;
 }
@@ -244,13 +195,9 @@ export function getProviderFromTaskId(taskId?: string | null): string {
       : (globalThis as any).Buffer.from(base64, "base64").toString("utf8");
     const parsed = JSON.parse(jsonStr);
     if (parsed && parsed.source) {
-      if (parsed.source === "procedural") return "Local Procedural";
-      if (parsed.source === "openrouter") return "OpenRouter";
-      if (parsed.source === "fal") return "Fal AI";
+      if (parsed.source === "modal") return "Modal GPU Compute Cluster";
       return String(parsed.source);
     }
-  } catch (e) {
-    // Treat raw as OpenRouter/Procedural
-  }
-  return "";
+  } catch (e) {}
+  return "Modal Cloud Workflow";
 }

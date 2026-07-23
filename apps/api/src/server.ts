@@ -28,7 +28,7 @@ import { submitRender, getRenderJob } from "./render_queue.js";
 import { FfmpegError } from "./ffmpeg.js";
 import { extractLastFrame } from "./frames.js";
 import { sliceAudio } from "./audio_slice.js";
-import { ensureVocalStem } from "./vocal.js";
+import { analyzeVocalTrack } from "./vocal.js";
 import { saveProject, listProjects, loadProject, deleteProject, listRenders } from "./projects.js";
 import { saveClip, listClips, deleteClip, generateLTXVideo } from "./clips.js";
 import { saveImage, listImages, deleteImage } from "./images.js";
@@ -567,7 +567,7 @@ const VocalStemBody = z.object({
 
 app.post("/api/songs/vocal-stem", async (req, reply) => {
   const body = VocalStemBody.parse(req.body);
-  const result = await ensureVocalStem(body.audioUrl);
+  const result = await analyzeVocalTrack(body.audioUrl);
   return reply.send(result);
 });
 
