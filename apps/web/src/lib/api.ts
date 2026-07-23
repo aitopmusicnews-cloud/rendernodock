@@ -165,3 +165,154 @@ export interface RenderSubmitResponse {
   state: RenderJobState;
   queuePosition: number | null;
 }
+
+// Avatar API
+export interface AvatarSummary {
+  id: string;
+  name: string;
+  status: "PROCESSING" | "READY" | "FAILED";
+  failureReason?: string;
+  imageUri?: string;
+  createdAt: number;
+}
+
+export async function createAvatar(imageUrl: string, name: string): Promise<{ avatarId: string; status: "PROCESSING" | "READY" | "FAILED"; failureReason?: string }> {
+  return jsonOrThrow(await fetch("/api/avatars/create", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ imageUrl, name }),
+  }));
+}
+
+export async function pollAvatar(avatarId: string, intervalMs = 2000, timeoutMs = 600_000): Promise<AvatarSummary> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await jsonOrThrow<AvatarSummary>(await fetch(`/api/avatars/${avatarId}`));
+    if (res.status === "READY" || res.status === "FAILED") return res;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error("avatar creation timed out");
+}
+
+export async function listAvatars(): Promise<AvatarSummary[]> {
+  return jsonOrThrow(await fetch("/api/avatars"));
+}
+
+// Video-to-Video and Text-to-Video
+export async function startVideoToVideo(req: any): Promise<{ id: string }> {
+  return jsonOrThrow(await fetch("/api/generate/video-to-video", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  }));
+}
+
+export async function startTextToVideo(req: any): Promise<{ id: string }> {
+  return jsonOrThrow(await fetch("/api/generate/text-to-video", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  }));
+}
+
+// Audio processing
+export async function ensureVocalStem(audioUrl: string): Promise<{ url: string }> {
+  return jsonOrThrow(await fetch("/api/audio/vocal-stem", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ audioUrl }),
+  }));
+}
+
+// Project API
+export async function listProjects(): Promise<ProjectMeta[]> {
+  return jsonOrThrow(await fetch("/api/projects"));
+}
+
+export async function loadProjectFromServer(id: string): Promise<{ name: string; state: any }> {
+  return jsonOrThrow(await fetch(`/api/projects/${id}`));
+}
+
+export async function deleteProjectOnServer(id: string): Promise<void> {
+  const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new ApiError(res.status, msg);
+  }
+}
+
+export async function saveProject(id: string, name: string, state: any, thumbnailUrl?: string): Promise<{ id: string }> {
+  return jsonOrThrow(await fetch("/api/projects", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, name, state, thumbnailUrl }),
+  }));
+}
+
+// Clip API
+export async function listSavedClips(): Promise<SavedClip[]> {
+  return jsonOrThrow(await fetch("/api/clips"));
+}
+
+export async function saveClipToServer(clip: SavedClip): Promise<SavedClip> {
+  return jsonOrThrow(await fetch("/api/clips", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(clip),
+  }));
+}
+
+export async function deleteClipOnServer(id: string): Promise<void> {
+  const res = await fetch(`/api/clips/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new ApiError(res.status, msg);
+  }
+}
+
+// Image/Library API
+export async function listSavedImages(): Promise<SavedImage[]> {
+  return jsonOrThrow(await fetch("/api/images/library"));
+}
+
+export async function saveImageToLibrary(image: SavedImage): Promise<SavedImage> {
+  return jsonOrThrow(await fetch("/api/images/library", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(image),
+  }));
+}
+
+export async function deleteImageFromLibrary(id: string): Promise<void> {
+  const res = await fetch(`/api/images/library/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new ApiError(res.status, msg);
+  }
+}
+
+// Library Folders API
+export async function listLibraryFolders(): Promise<LibraryFolder[]> {
+  return jsonOrThrow(await fetch("/api/library/folders"));
+}
+
+export async function saveLibraryFolder(folder: LibraryFolder): Promise<LibraryFolder> {
+  return jsonOrThrow(await fetch("/api/library/folders", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(folder),
+  }));
+}
+
+export async function deleteLibraryFolder(id: string): Promise<void> {
+  const res = await fetch(`/api/library/folders/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new ApiError(res.status, msg);
+  }
+}
+
+// Renders API
+export async function listRenders(): Promise<RenderEntry[]> {
+  return jsonOrThrow(await fetch("/api/renders"));
+}
